@@ -4,6 +4,9 @@
 #include <QMainWindow>
 #include <QString>
 
+#include "runtime/memory.hpp"
+#include "runtime/tools.hpp"
+
 #include <vector>
 
 QT_BEGIN_NAMESPACE
@@ -32,6 +35,8 @@ private:
     std::vector<QString> notes_{};
     QString last_user_message_{};
     int interaction_count_{0};
+    codebeat::runtime::ConversationMemory memory_{};
+    codebeat::runtime::Tools tools_{};
 };
 #else
 class MainWindow final {

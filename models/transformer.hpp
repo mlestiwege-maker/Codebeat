@@ -3,10 +3,12 @@
 #include "engine/autodiff.hpp"
 #include "engine/ops.hpp"
 #include "engine/rng.hpp"
+#include "engine/serialize.hpp"
 #include "engine/tensor.hpp"
 
 #include <cmath>
 #include <cstddef>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -215,6 +217,31 @@ public:
 
     [[nodiscard]] engine::Tensor& get_output_projection() { return output_proj_; }
     [[nodiscard]] EmbeddingLayer& get_embedding() { return embed_; }
+
+    [[nodiscard]] bool save_checkpoint(const std::string& prefix) const {
+        const bool ok_emb = engine::save_tensor_binary(embed_.token_embedding(), prefix + ".emb.bin");
+        const bool ok_out = engine::save_tensor_binary(output_proj_, prefix + ".out.bin");
+        return ok_emb && ok_out;
+    }
+
+    [[nodiscard]] bool load_checkpoint(const std::string& prefix) {
+        engine::Tensor loaded_emb;
+        engine::Tensor loaded_out;
+
+        if (!engine::load_tensor_binary(loaded_emb, prefix + ".emb.bin") ||
+            !engine::load_tensor_binary(loaded_out, prefix + ".out.bin")) {
+            return false;
+        }
+
+        if (!loaded_emb.same_shape_as(embed_.token_embedding()) ||
+            !loaded_out.same_shape_as(output_proj_)) {
+            return false;
+        }
+
+        embed_.token_embedding() = std::move(loaded_emb);
+        output_proj_ = std::move(loaded_out);
+        return true;
+    }
 
 private:
     TransformerConfig cfg_;

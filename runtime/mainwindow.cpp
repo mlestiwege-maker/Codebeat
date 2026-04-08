@@ -35,24 +35,40 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("what did i tell you") || lowered.contains("what do you remember")) {
-        if (notes_.empty()) {
+        const auto recent = memory_.recent(6);
+        if (recent.empty() && notes_.empty()) {
             return "You haven’t asked me to remember anything yet.";
         }
-        QString summary = "Here’s what I remember:";
-        const int start = std::max(0, static_cast<int>(notes_.size()) - 3);
-        for (int i = start; i < static_cast<int>(notes_.size()); ++i) {
-            summary += "\n• " + notes_[static_cast<std::size_t>(i)];
+
+        QString summary = "Here’s my recent memory:";
+        for (const auto& item : recent) {
+            summary += "\n• " + QString::fromStdString(item);
+        }
+
+        if (!notes_.empty()) {
+            summary += "\nStored notes:";
+            const int start = std::max(0, static_cast<int>(notes_.size()) - 3);
+            for (int i = start; i < static_cast<int>(notes_.size()); ++i) {
+                summary += "\n• " + notes_[static_cast<std::size_t>(i)];
+            }
         }
         return summary;
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember notes, summarize, and help with code. Try: remember ..., status, summarize, or just ask normally.";
+        return "I can chat naturally, remember context, summarize, answer questions, and run built-in tools. Try: remember ..., status, time, summarize, what do you remember.";
     }
 
     if (lowered.contains("status")) {
+        const auto tool_info = tools_.capabilities();
         return "All systems nominal. Interaction count: " + QString::number(interaction_count_) +
-               " | Notes stored: " + QString::number(static_cast<int>(notes_.size())) + ".";
+               " | Notes stored: " + QString::number(static_cast<int>(notes_.size())) +
+               " | " + QString::fromStdString(tool_info.output) + ".";
+    }
+
+    if (lowered == "time" || lowered.contains("what time") || lowered.contains("current time")) {
+        const auto result = tools_.now_time();
+        return QString::fromStdString(result.output);
     }
 
     if (lowered.contains("summarize")) {
@@ -307,6 +323,7 @@ void MainWindow::onSend() {
     }
 
     chatView_->append(QString("<span style='color: #00ffff; font-weight: bold;'>You:</span> %1").arg(text));
+    memory_.push("user: " + text.toStdString());
 
     if (text.trimmed().compare("lock", Qt::CaseInsensitive) == 0 ||
         text.trimmed().compare("lock app", Qt::CaseInsensitive) == 0 ||
@@ -336,6 +353,7 @@ void MainWindow::onSend() {
 
     chatView_->append(QString("<span style='color: %1; font-weight: bold;'>Codebeat:</span> %2")
                       .arg(response_color, response));
+    memory_.push("assistant: " + response.toStdString());
     last_user_message_ = text;
     input_->clear();
     input_->setFocus();

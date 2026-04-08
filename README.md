@@ -11,6 +11,8 @@ From-scratch C++ AI assistant project (tiny-first curriculum), with a Qt desktop
 - ✅ In-app relock flow (return to first access screen)
 - ✅ Working quick action buttons and conversational replies
 - ✅ Real next-token training loop with gradient updates and loss trend output
+- ✅ Training checkpoint save/load support for learned weights
+- ✅ Runtime memory + tool integration (time/status/capabilities)
 
 ## GUI behavior
 
@@ -36,6 +38,7 @@ cmake --build build -j
 - It tokenizes text using byte-level encoding and trains over token pairs.
 - It updates token embeddings and output projection weights using gradient descent.
 - It reports per-epoch average loss and prints first/last loss trend.
+- It saves checkpoints to `data/processed/codebeat_epoch_N.*` and `codebeat_latest.*`.
 
 ### With Qt GUI
 

@@ -11,6 +11,9 @@ codebeat_gui
 codebeat_train
 codebeat_repl
 
+# Generated model checkpoints
+data/processed/*.bin
+
 # IDE / editor
 .vscode/
 *.swp

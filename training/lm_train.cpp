@@ -5,6 +5,7 @@
 #include "training/trainer.hpp"
 
 #include <iostream>
+#include <sstream>
 #include <vector>
 
 int main() {
@@ -41,11 +42,23 @@ int main() {
     for (int epoch = 0; epoch < kEpochs; ++epoch) {
         std::cout << "[train] starting epoch " << (epoch + 1) << "/" << kEpochs << "\n";
         stats.push_back(trainer.run_epoch(0.01f));
+
+        std::ostringstream ckpt_prefix;
+        ckpt_prefix << "data/processed/codebeat_epoch_" << (epoch + 1);
+        if (model.save_checkpoint(ckpt_prefix.str())) {
+            std::cout << "[train] checkpoint saved: " << ckpt_prefix.str() << "(.emb.bin/.out.bin)\n";
+        } else {
+            std::cout << "[train] warning: failed to save checkpoint for epoch " << (epoch + 1) << "\n";
+        }
     }
 
     if (!stats.empty()) {
         std::cout << "[train] loss trend: first=" << stats.front().avg_loss
                   << " last=" << stats.back().avg_loss << "\n";
+    }
+
+    if (model.save_checkpoint("data/processed/codebeat_latest")) {
+        std::cout << "[train] latest checkpoint saved to data/processed/codebeat_latest(.emb.bin/.out.bin)\n";
     }
 
     return 0;
