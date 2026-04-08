@@ -1,0 +1,21 @@
+# Build artifacts
+build/
+build_gui/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Binary outputs
+codebeat_gui
+codebeat_train
+codebeat_repl
+
+# IDE / editor
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
