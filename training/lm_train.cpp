@@ -41,7 +41,7 @@ int main() {
     constexpr int kEpochs = 3;
     for (int epoch = 0; epoch < kEpochs; ++epoch) {
         std::cout << "[train] starting epoch " << (epoch + 1) << "/" << kEpochs << "\n";
-        stats.push_back(trainer.run_epoch(0.01f));
+        stats.push_back(trainer.run_epoch(0.01f, true));
 
         std::ostringstream ckpt_prefix;
         ckpt_prefix << "data/processed/codebeat_epoch_" << (epoch + 1);

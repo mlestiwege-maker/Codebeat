@@ -3,11 +3,13 @@
 #include "models/transformer.hpp"
 #include "models/tokenizer.hpp"
 #include "training/dataset.hpp"
+#include "engine/autodiff.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <vector>
 
 namespace codebeat::training {
@@ -17,13 +19,68 @@ public:
     LMTrainer(models::TinyDecoderTransformer& model, LineDataset& ds)
         : model_(model), ds_(ds) {}
 
+    class NextTokenUpdateNode final : public engine::ComputeNode {
+    public:
+        NextTokenUpdateNode(engine::Tensor& emb,
+                            engine::Tensor& out,
+                            std::size_t input_id,
+                            std::vector<float> hidden,
+                            std::vector<float> dlogits,
+                            float learning_rate)
+            : emb_(emb),
+              out_(out),
+              input_id_(input_id),
+              hidden_(std::move(hidden)),
+              dlogits_(std::move(dlogits)),
+              learning_rate_(learning_rate) {}
+
+        void backward(engine::Tensor /*grad*/) override {
+            const std::size_t d_model = hidden_.size();
+            const std::size_t vocab = dlogits_.size();
+
+            std::vector<float> emb_grad(d_model, 0.0f);
+            for (std::size_t j = 0; j < d_model; ++j) {
+                float g = 0.0f;
+                for (std::size_t c = 0; c < vocab; ++c) {
+                    g += out_.at(j, c) * dlogits_[c];
+                }
+                emb_grad[j] = g;
+            }
+
+            // Update output projection.
+            for (std::size_t j = 0; j < d_model; ++j) {
+                const float hj = hidden_[j];
+                for (std::size_t c = 0; c < vocab; ++c) {
+                    out_.at(j, c) -= learning_rate_ * hj * dlogits_[c];
+                }
+            }
+
+            // Update token embedding row.
+            for (std::size_t j = 0; j < d_model; ++j) {
+                emb_.at(input_id_, j) -= learning_rate_ * emb_grad[j];
+            }
+        }
+
+        [[nodiscard]] std::string op_name() const override {
+            return "next_token_linear_update";
+        }
+
+    private:
+        engine::Tensor& emb_;
+        engine::Tensor& out_;
+        std::size_t input_id_;
+        std::vector<float> hidden_;
+        std::vector<float> dlogits_;
+        float learning_rate_;
+    };
+
     struct EpochStats {
         std::size_t lines{0};
         std::size_t token_pairs{0};
         float avg_loss{0.0f};
     };
 
-    EpochStats run_epoch(float learning_rate = 0.01f) {
+    EpochStats run_epoch(float learning_rate = 0.01f, bool use_autodiff = true) {
         if (!ds_.open()) {
             throw std::runtime_error("LMTrainer::run_epoch: failed to open dataset");
         }
@@ -84,27 +141,42 @@ public:
                 std::vector<float> dlogits = probs;
                 dlogits[target_id] -= 1.0f;
 
-                // Cache old out matrix row needed for embedding gradient before update.
-                std::vector<float> emb_grad(d_model, 0.0f);
-                for (std::size_t j = 0; j < d_model; ++j) {
-                    float g = 0.0f;
-                    for (std::size_t c = 0; c < vocab; ++c) {
-                        g += out.at(j, c) * dlogits[c];
+                if (use_autodiff) {
+                    std::vector<float> hidden_vec(d_model, 0.0f);
+                    for (std::size_t j = 0; j < d_model; ++j) {
+                        hidden_vec[j] = hidden.at(0, j);
                     }
-                    emb_grad[j] = g;
-                }
 
-                // Update output projection: W_out[j,c] -= lr * h[j] * dlogits[c]
-                for (std::size_t j = 0; j < d_model; ++j) {
-                    const float hj = hidden.at(0, j);
-                    for (std::size_t c = 0; c < vocab; ++c) {
-                        out.at(j, c) -= learning_rate * hj * dlogits[c];
+                    engine::AutodiffTape tape(true);
+                    auto node = std::make_shared<NextTokenUpdateNode>(
+                        emb, out, input_id, std::move(hidden_vec), dlogits, learning_rate);
+                    tape.record(node);
+
+                    engine::Variable loss_var;
+                    loss_var.name = "cross_entropy";
+                    loss_var.value = engine::Tensor({1, 1}, loss);
+                    tape.backward(loss_var, 1.0f);
+                } else {
+                    // Fallback manual path.
+                    std::vector<float> emb_grad(d_model, 0.0f);
+                    for (std::size_t j = 0; j < d_model; ++j) {
+                        float g = 0.0f;
+                        for (std::size_t c = 0; c < vocab; ++c) {
+                            g += out.at(j, c) * dlogits[c];
+                        }
+                        emb_grad[j] = g;
                     }
-                }
 
-                // Update token embedding row for input token.
-                for (std::size_t j = 0; j < d_model; ++j) {
-                    emb.at(input_id, j) -= learning_rate * emb_grad[j];
+                    for (std::size_t j = 0; j < d_model; ++j) {
+                        const float hj = hidden.at(0, j);
+                        for (std::size_t c = 0; c < vocab; ++c) {
+                            out.at(j, c) -= learning_rate * hj * dlogits[c];
+                        }
+                    }
+
+                    for (std::size_t j = 0; j < d_model; ++j) {
+                        emb.at(input_id, j) -= learning_rate * emb_grad[j];
+                    }
                 }
             }
 
@@ -127,7 +199,8 @@ public:
         std::cout << "[train] epoch complete lines=" << stats.lines
                   << " token_pairs=" << stats.token_pairs
                   << " avg_loss=" << stats.avg_loss
-                  << " using " << model_.info() << "\n";
+                  << " using " << model_.info()
+                  << " (autodiff=" << (use_autodiff ? "on" : "off") << ")\n";
         return stats;
     }
 

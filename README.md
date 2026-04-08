@@ -23,6 +23,35 @@ From-scratch C++ AI assistant project (tiny-first curriculum), with a Qt desktop
 
 ## Build
 
+## How to run Codebeat
+
+From the project root (`codebeat/`):
+
+### 1) Build GUI + CLI
+
+```bash
+cmake -S . -B build_gui -DCODEBEAT_BUILD_GUI=ON
+cmake --build build_gui -j
+```
+
+### 2) Run desktop app
+
+```bash
+./build_gui/codebeat_gui
+```
+
+### 3) Run trainer
+
+```bash
+./build_gui/codebeat_train
+```
+
+### 4) Run REPL
+
+```bash
+./build_gui/codebeat_repl
+```
+
 ### CLI only
 
 ```bash
