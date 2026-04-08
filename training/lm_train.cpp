@@ -5,6 +5,7 @@
 #include "training/trainer.hpp"
 
 #include <iostream>
+#include <vector>
 
 int main() {
     using namespace codebeat;
@@ -35,7 +36,17 @@ int main() {
     }
 
     training::LMTrainer trainer(model, dataset);
-    trainer.run_epoch();
+    std::vector<training::LMTrainer::EpochStats> stats;
+    constexpr int kEpochs = 3;
+    for (int epoch = 0; epoch < kEpochs; ++epoch) {
+        std::cout << "[train] starting epoch " << (epoch + 1) << "/" << kEpochs << "\n";
+        stats.push_back(trainer.run_epoch(0.01f));
+    }
+
+    if (!stats.empty()) {
+        std::cout << "[train] loss trend: first=" << stats.front().avg_loss
+                  << " last=" << stats.back().avg_loss << "\n";
+    }
 
     return 0;
 }

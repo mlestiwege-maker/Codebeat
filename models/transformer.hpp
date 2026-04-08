@@ -198,6 +198,21 @@ public:
         return params;
     }
 
+    [[nodiscard]] engine::Tensor encode_token(std::size_t token_id, std::size_t seq_pos) {
+        auto x = embed_.lookup(token_id);
+        return embed_.add_positional_encoding(x, seq_pos);
+    }
+
+    [[nodiscard]] engine::Tensor logits_from_hidden(const engine::Tensor& hidden) const {
+        // hidden: [1, d_model], output_proj_: [d_model, vocab]
+        return engine::ops::matmul_2d(hidden, output_proj_);
+    }
+
+    [[nodiscard]] engine::Tensor forward_logits(std::size_t token_id, std::size_t seq_pos) {
+        const auto h = encode_token(token_id, seq_pos);
+        return logits_from_hidden(h);
+    }
+
     [[nodiscard]] engine::Tensor& get_output_projection() { return output_proj_; }
     [[nodiscard]] EmbeddingLayer& get_embedding() { return embed_; }
 
