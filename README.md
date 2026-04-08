@@ -34,6 +34,14 @@ cmake -S . -B build_gui -DCODEBEAT_BUILD_GUI=ON
 cmake --build build_gui -j
 ```
 
+Or use one-command launchers from the project root:
+
+```bash
+./run_gui.sh
+./train.sh
+./repl.sh
+```
+
 ### 2) Run desktop app
 
 ```bash
