@@ -268,31 +268,131 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     main_layout->addWidget(header);
 
+    auto* content_frame = new QFrame(central);
+    content_frame->setStyleSheet("QFrame { background-color: #050505; }");
+    auto* content_layout = new QHBoxLayout(content_frame);
+    content_layout->setContentsMargins(10, 10, 10, 10);
+    content_layout->setSpacing(10);
+
+    auto* hud_panel = new QFrame(content_frame);
+    hud_panel->setFixedWidth(290);
+    hud_panel->setStyleSheet(
+        "QFrame {"
+        "  background-color: #090c11;"
+        "  border: 1px solid #133042;"
+        "  border-radius: 10px;"
+        "}"
+    );
+    auto* hud_layout = new QVBoxLayout(hud_panel);
+    hud_layout->setContentsMargins(14, 14, 14, 14);
+    hud_layout->setSpacing(10);
+
+    auto* hud_title = new QLabel("TACTICAL PANEL", hud_panel);
+    hud_title->setStyleSheet("color:#69e9ff; font-family:'Monospace'; font-size:12px; font-weight:700; border:none;");
+    hud_layout->addWidget(hud_title);
+
+    auto makeStatCard = [hud_panel](const QString& name, const QString& value, const QString& accent) {
+        auto* card = new QFrame(hud_panel);
+        card->setStyleSheet(
+            "QFrame {"
+            "  background-color: #10161f;"
+            "  border: 1px solid #1c3d52;"
+            "  border-radius: 8px;"
+            "}"
+        );
+        auto* l = new QVBoxLayout(card);
+        l->setContentsMargins(10, 8, 10, 8);
+        l->setSpacing(2);
+
+        auto* n = new QLabel(name, card);
+        n->setStyleSheet("color:#93a7b7; font-family:'Monospace'; font-size:10px; border:none;");
+        l->addWidget(n);
+
+        auto* v = new QLabel(value, card);
+        v->setStyleSheet("color:" + accent + "; font-family:'Monospace'; font-size:12px; font-weight:700; border:none;");
+        l->addWidget(v);
+        return card;
+    };
+
+    hud_layout->addWidget(makeStatCard("SYSTEM", "ONLINE", "#6bffb4"));
+    hud_layout->addWidget(makeStatCard("MODEL", "TINY-LOCAL", "#8ad8ff"));
+    hud_layout->addWidget(makeStatCard("AUTH", "ACTIVE", "#ff9cd0"));
+
+    auto* quick_label = new QLabel("Quick Control", hud_panel);
+    quick_label->setStyleSheet("color:#7ec7dd; font-family:'Segoe UI'; font-size:11px; font-weight:600; border:none;");
+    hud_layout->addWidget(quick_label);
+
+    auto makeHudBtn = [hud_panel](const QString& txt) {
+        auto* b = new QPushButton(txt, hud_panel);
+        b->setFixedHeight(30);
+        b->setStyleSheet(
+            "QPushButton {"
+            "  background-color:#131b24;"
+            "  color:#d8f7ff;"
+            "  border:1px solid #28485f;"
+            "  border-radius:6px;"
+            "  font-family:'Segoe UI';"
+            "  font-size:10px;"
+            "  text-align:left;"
+            "  padding-left:10px;"
+            "}"
+            "QPushButton:hover { border:1px solid #00d8ff; background-color:#162435; }"
+        );
+        return b;
+    };
+
+    auto* cmd_open_chrome = makeHudBtn("▶ open chrome");
+    auto* cmd_open_code = makeHudBtn("▶ open vs code");
+    auto* cmd_search_cpp = makeHudBtn("▶ search c++ qt tutorial");
+    auto* cmd_status = makeHudBtn("▶ status");
+
+    hud_layout->addWidget(cmd_open_chrome);
+    hud_layout->addWidget(cmd_open_code);
+    hud_layout->addWidget(cmd_search_cpp);
+    hud_layout->addWidget(cmd_status);
+    hud_layout->addStretch();
+
+    auto* terminal_hint = new QLabel("Tip: type `what can you control` for full command list.", hud_panel);
+    terminal_hint->setWordWrap(true);
+    terminal_hint->setStyleSheet("color:#7a8b97; font-family:'Monospace'; font-size:10px; border:none;");
+    hud_layout->addWidget(terminal_hint);
+
+    auto* right_panel = new QFrame(content_frame);
+    right_panel->setStyleSheet(
+        "QFrame {"
+        "  background-color: #07090d;"
+        "  border: 1px solid #13202b;"
+        "  border-radius: 10px;"
+        "}"
+    );
+    auto* right_layout = new QVBoxLayout(right_panel);
+    right_layout->setContentsMargins(8, 8, 8, 8);
+    right_layout->setSpacing(8);
+
     // Chat view with enhanced styling
-    chatView_ = new QTextEdit(central);
+    chatView_ = new QTextEdit(right_panel);
     chatView_->setReadOnly(true);
     chatView_->setPlaceholderText("Messages appear here...");
     chatView_->setStyleSheet(
         "QTextEdit {"
         "  background-color: #0a0a0a;"
         "  color: #d7f9ff;"
-        "  border: none;"
+        "  border: 1px solid #152736;"
         "  font-family: 'Fira Code', 'Monospace';"
         "  font-size: 12px;"
         "  padding: 15px;"
-        "  margin: 5px;"
+        "  margin: 0px;"
         "  selection-background-color: #22445a;"
-        "  border-radius: 0px;"
+        "  border-radius: 8px;"
         "}"
         "QTextEdit:focus { outline: none; }"
         "QScrollBar:vertical { width: 8px; background-color: #121212; border-radius: 4px; }"
         "QScrollBar::handle:vertical { background-color: #1d4f66; border-radius: 4px; }"
     );
-
-    main_layout->addWidget(chatView_, 1);
+    right_layout->addWidget(chatView_, 1);
 
     // Input section with gradient border
-    auto* input_section = new QFrame(central);
+    auto* input_section = new QFrame(right_panel);
     input_section->setStyleSheet(
         "QFrame {"
         "  background-color: #050505;"
@@ -428,7 +528,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     quick_btns_layout->addStretch();
     input_layout->addLayout(quick_btns_layout);
 
-    main_layout->addWidget(input_section);
+    right_layout->addWidget(input_section);
+
+    content_layout->addWidget(hud_panel);
+    content_layout->addWidget(right_panel, 1);
+    main_layout->addWidget(content_frame, 1);
 
     setCentralWidget(central);
     setWindowTitle("Codebeat • Neural Assistant");
@@ -437,6 +541,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     QObject::connect(sendBtn, &QPushButton::clicked, this, &MainWindow::onSend);
     QObject::connect(input_, &QLineEdit::returnPressed, this, &MainWindow::onSend);
+    QObject::connect(cmd_open_chrome, &QPushButton::clicked, this, [this]() { runQuickAction("open chrome"); });
+    QObject::connect(cmd_open_code, &QPushButton::clicked, this, [this]() { runQuickAction("open vs code"); });
+    QObject::connect(cmd_search_cpp, &QPushButton::clicked, this, [this]() { runQuickAction("search c++ qt tutorial"); });
+    QObject::connect(cmd_status, &QPushButton::clicked, this, [this]() { runQuickAction("status"); });
     QObject::connect(voiceBtn, &QPushButton::clicked, this, [this]() {
         chatView_->append("<span style='color:#7fffcf;'>Codebeat:</span> Listening for voice command...");
         const auto heard = captureVoiceCommand();
