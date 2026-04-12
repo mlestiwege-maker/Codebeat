@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
+#include <QProcess>
 #include <QPushButton>
 #include <QScreen>
 #include <QTimer>
@@ -45,7 +46,8 @@ void SplashScreen::prepareForAuth() {
 }
 
 void SplashScreen::setupAuthUi() {
-    prompt_label_ = new QLabel("Wake word or passkey", this);
+    const auto os_user = qEnvironmentVariable("USER", "operator");
+    prompt_label_ = new QLabel("Welcome " + os_user + " • authenticate with passkey or biometrics", this);
     prompt_label_->setAlignment(Qt::AlignCenter);
     prompt_label_->setStyleSheet(
         "QLabel {"
@@ -56,7 +58,7 @@ void SplashScreen::setupAuthUi() {
         " background: transparent;"
         "}"
     );
-    prompt_label_->setGeometry(280, 320, 340, 24);
+    prompt_label_->setGeometry(150, 320, 600, 24);
 
     auth_input_ = new QLineEdit(this);
     auth_input_->setPlaceholderText("Enter wake word or passkey...");
@@ -97,6 +99,26 @@ void SplashScreen::setupAuthUi() {
         "}"
     );
 
+    face_auth_button_ = new QPushButton("Face Auth", this);
+    face_auth_button_->setGeometry(660, 350, 100, 40);
+    face_auth_button_->setStyleSheet(
+        "QPushButton {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #16a085, stop:1 #1abc9c);"
+        "  color: #ffffff;"
+        "  border: none;"
+        "  border-radius: 8px;"
+        "  font-family: 'Segoe UI', 'Calibri';"
+        "  font-size: 12px;"
+        "  font-weight: 700;"
+        "}"
+        "QPushButton:hover {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1cb99a, stop:1 #2ad3af);"
+        "}"
+        "QPushButton:pressed {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0f7f69, stop:1 #13a88b);"
+        "}"
+    );
+
     feedback_label_ = new QLabel(this);
     feedback_label_->setAlignment(Qt::AlignCenter);
     feedback_label_->setStyleSheet(
@@ -110,6 +132,7 @@ void SplashScreen::setupAuthUi() {
     feedback_label_->setGeometry(220, 396, 460, 22);
 
     connect(unlock_button_, &QPushButton::clicked, this, [this]() { onAuthenticate(); });
+    connect(face_auth_button_, &QPushButton::clicked, this, [this]() { onBiometricAuthenticate(); });
     connect(auth_input_, &QLineEdit::returnPressed, this, [this]() { onAuthenticate(); });
     auth_input_->setFocus();
 }
@@ -141,6 +164,32 @@ void SplashScreen::onAuthenticate() {
     );
     feedback_label_->setText("Invalid wake word/passkey. Try again.");
     auth_input_->selectAll();
+    auth_input_->setFocus();
+}
+
+void SplashScreen::onBiometricAuthenticate() {
+    updateStatus("Biometric scan in progress...");
+
+    // Linux face auth hook: uses Howdy if installed/configured.
+    QProcess proc;
+    proc.start("bash", {"-lc", "if command -v howdy >/dev/null 2>&1; then howdy test >/dev/null 2>&1; else exit 2; fi"});
+    const bool done = proc.waitForFinished(15000);
+
+    if (done && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
+        updateStatus("Biometric authentication successful • entering system...");
+        feedback_label_->setStyleSheet(
+            "QLabel { color: #7bffba; font-family: 'Segoe UI', 'Calibri'; font-size: 11px; background: transparent; }"
+        );
+        feedback_label_->setText("Biometric ID confirmed");
+        emit finished();
+        return;
+    }
+
+    updateStatus("Biometric check unavailable or failed");
+    feedback_label_->setStyleSheet(
+        "QLabel { color: #ffcc66; font-family: 'Segoe UI', 'Calibri'; font-size: 11px; background: transparent; }"
+    );
+    feedback_label_->setText("Face authentication unavailable/failed. Use passkey unlock.");
     auth_input_->setFocus();
 }
 

@@ -9,9 +9,64 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QLabel>
+#include <QProcess>
+#include <QRegularExpression>
 #include <QFrame>
 
 #include <algorithm>
+
+bool MainWindow::launchAny(const QStringList& executables, const QStringList& args) {
+    for (const auto& exe : executables) {
+        if (QProcess::startDetached(exe, args)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
+    handled = false;
+    const auto lowered = text.trimmed().toLower();
+
+    if (lowered == "open chrome" || lowered == "open google chrome") {
+        handled = true;
+        const bool ok = launchAny({"google-chrome", "google-chrome-stable", "chromium", "chromium-browser"});
+        return ok ? "Opening Chrome." : "Could not launch Chrome. Check if it is installed.";
+    }
+
+    if (lowered == "open vs code" || lowered == "open vscode" || lowered == "open code") {
+        handled = true;
+        const bool ok = launchAny({"code", "codium"});
+        return ok ? "Opening VS Code." : "Could not launch VS Code. Check if 'code' is on PATH.";
+    }
+
+    if (lowered == "open terminal") {
+        handled = true;
+        const bool ok = launchAny({"gnome-terminal", "konsole", "xfce4-terminal", "xterm"});
+        return ok ? "Opening terminal." : "Could not launch a terminal app.";
+    }
+
+    if (lowered.startsWith("open ") && lowered.size() > 5) {
+        handled = true;
+        const auto app = lowered.mid(5).trimmed();
+        const bool ok = QProcess::startDetached(app, {});
+        return ok ? ("Opening " + app + ".") : ("I couldn't open '" + app + "'.");
+    }
+
+    if (lowered.startsWith("run ") && lowered.size() > 4) {
+        handled = true;
+        const auto cmd = text.mid(4).trimmed();
+        const bool ok = QProcess::startDetached("bash", {"-lc", cmd});
+        return ok ? ("Running command: " + cmd) : "Command execution failed to start.";
+    }
+
+    if (lowered == "what can you control" || lowered == "apps") {
+        handled = true;
+        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open <app>, run <command>.";
+    }
+
+    return {};
+}
 
 void MainWindow::runQuickAction(const QString& text) {
     input_->setText(text);
@@ -20,6 +75,12 @@ void MainWindow::runQuickAction(const QString& text) {
 
 QString MainWindow::generateAssistantReply(const QString& text) {
     const auto lowered = text.trimmed().toLower();
+
+    bool handled = false;
+    const auto taskReply = tryHandleSystemTask(text, handled);
+    if (handled) {
+        return taskReply;
+    }
 
     if (lowered == "lock" || lowered == "lock app" || lowered == "relock") {
         return "Locking now...";
@@ -311,8 +372,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // Welcome with styled text
     chatView_->append("<span style='color: #ff6b9d; font-weight: bold;'>[⚡ CODEBEAT]</span>");
-    chatView_->append("<span style='color: #00ffff;'>System initialized and ready.</span>");
-    chatView_->append("<span style='color: #8b3dff;'>Type 'help' for available commands.</span>");
+    chatView_->append("<span style='color: #00ffff;'>System initialized and live. Good to see you.</span>");
+    chatView_->append("<span style='color: #8b3dff;'>Try: open chrome, open vs code, open terminal, run ls, help.</span>");
     chatView_->append("");
 }
 

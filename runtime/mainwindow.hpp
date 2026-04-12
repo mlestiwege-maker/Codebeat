@@ -28,6 +28,8 @@ private slots:
 
 private:
     void runQuickAction(const QString& text);
+    QString tryHandleSystemTask(const QString& text, bool& handled);
+    static bool launchAny(const QStringList& executables, const QStringList& args = {});
     QString generateAssistantReply(const QString& text);
 
     QTextEdit* chatView_{nullptr};

@@ -18,8 +18,20 @@ From-scratch C++ AI assistant project (tiny-first curriculum), with a Qt desktop
 
 - App starts on splash access screen.
 - Enter wake word/passkey to unlock and enter the assistant.
+- Optional biometric button uses Linux face-auth hook (`howdy test`) if available.
 - In main app, click **LOCK** (or type `lock`) to return to splash access screen.
 - Black premium UI theme with neon accents.
+
+## App/task control commands
+
+Inside Codebeat chat, you can now run:
+
+- `open chrome`
+- `open vs code`
+- `open terminal`
+- `open <app_name>`
+- `run <shell_command>`
+- `what can you control`
 
 ## Build
 
@@ -40,6 +52,20 @@ Or use one-command launchers from the project root:
 ./run_gui.sh
 ./train.sh
 ./repl.sh
+```
+
+### Start Codebeat automatically after login
+
+Install autostart entry:
+
+```bash
+./install_autostart.sh
+```
+
+Remove autostart entry:
+
+```bash
+./uninstall_autostart.sh
 ```
 
 ### 2) Run desktop app
