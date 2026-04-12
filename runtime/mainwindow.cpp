@@ -9,6 +9,8 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QLabel>
+#include <QCoreApplication>
+#include <QDir>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QFrame>
@@ -22,6 +24,28 @@ bool MainWindow::launchAny(const QStringList& executables, const QStringList& ar
         }
     }
     return false;
+}
+
+QString MainWindow::captureVoiceCommand() {
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir d(appDir);
+    d.cdUp(); // from build_gui -> project root
+    const QString scriptPath = d.absoluteFilePath("voice_recognize.sh");
+
+    QProcess proc;
+    proc.start("bash", {"-lc", "\"" + scriptPath + "\""});
+
+    if (!proc.waitForFinished(35000)) {
+        proc.kill();
+        return {};
+    }
+
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+        return {};
+    }
+
+    const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+    return out;
 }
 
 QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
@@ -281,6 +305,28 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     auto* input_row = new QHBoxLayout();
     input_row->addWidget(input_, 1);
 
+    auto* voiceBtn = new QPushButton("🎙 VOICE", input_section);
+    voiceBtn->setFixedWidth(110);
+    voiceBtn->setMinimumHeight(40);
+    voiceBtn->setStyleSheet(
+        "QPushButton {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #18a56f, stop:1 #0f7f54);"
+        "  color: #ffffff;"
+        "  border: none;"
+        "  border-radius: 8px;"
+        "  font-family: 'Monospace';"
+        "  font-weight: bold;"
+        "  font-size: 11px;"
+        "}"
+        "QPushButton:hover {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #20be80, stop:1 #149b66);"
+        "}"
+        "QPushButton:pressed {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0d6a46, stop:1 #0b5a3b);"
+        "}"
+    );
+    input_row->addWidget(voiceBtn);
+
     // Modern send button with hover effects
     auto* sendBtn = new QPushButton("▶ SEND", input_section);
     sendBtn->setFixedWidth(100);
@@ -360,6 +406,18 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     QObject::connect(sendBtn, &QPushButton::clicked, this, &MainWindow::onSend);
     QObject::connect(input_, &QLineEdit::returnPressed, this, &MainWindow::onSend);
+    QObject::connect(voiceBtn, &QPushButton::clicked, this, [this]() {
+        chatView_->append("<span style='color:#7fffcf;'>Codebeat:</span> Listening for voice command...");
+        const auto heard = captureVoiceCommand();
+        if (heard.isEmpty()) {
+            chatView_->append("<span style='color:#ffcc66;'>Codebeat:</span> Voice recognition unavailable or no speech captured.");
+            return;
+        }
+
+        input_->setText(heard);
+        chatView_->append(QString("<span style='color:#7fffcf;'>Codebeat:</span> Heard: %1").arg(heard));
+        onSend();
+    });
     QObject::connect(lockBtn, &QPushButton::clicked, this, [this]() { emit lockRequested(); });
 
     if (quickButtons.size() >= 5) {
@@ -373,7 +431,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Welcome with styled text
     chatView_->append("<span style='color: #ff6b9d; font-weight: bold;'>[⚡ CODEBEAT]</span>");
     chatView_->append("<span style='color: #00ffff;'>System initialized and live. Good to see you.</span>");
-    chatView_->append("<span style='color: #8b3dff;'>Try: open chrome, open vs code, open terminal, run ls, help.</span>");
+    chatView_->append("<span style='color: #8b3dff;'>Try: open chrome, open vs code, open terminal, run ls, help, or use 🎙 VOICE.</span>");
     chatView_->append("");
 }
 

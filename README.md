@@ -33,6 +33,12 @@ Inside Codebeat chat, you can now run:
 - `run <shell_command>`
 - `what can you control`
 
+Voice control:
+
+- Click `🎙 VOICE` in the main app and speak a command.
+- Linux dependency for built-in voice path: `arecord` + `whisper` CLI.
+- Voice capture script: `./voice_recognize.sh` (records 4s and transcribes).
+
 ## Build
 
 ## How to run Codebeat
