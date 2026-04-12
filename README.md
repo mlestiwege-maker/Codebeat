@@ -30,7 +30,11 @@ Inside Codebeat chat, you can now run:
 - `open vs code`
 - `open terminal`
 - `open <app_name>`
+- `open https://<url>`
+- `search <query>`
+- `close <app_name>`
 - `run <shell_command>`
+- `execute <shell_command>`
 - `what can you control`
 
 Voice control:

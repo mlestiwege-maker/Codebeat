@@ -71,22 +71,47 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
     }
 
     if (lowered.startsWith("open ") && lowered.size() > 5) {
+        const auto maybeUrl = lowered.mid(5).trimmed();
+        if (maybeUrl.startsWith("http://") || maybeUrl.startsWith("https://") || maybeUrl.startsWith("www.")) {
+            handled = true;
+            const auto url = maybeUrl.startsWith("www.") ? ("https://" + maybeUrl) : maybeUrl;
+            const bool ok = QProcess::startDetached("xdg-open", {url});
+            return ok ? ("Opening URL: " + url) : "Could not open URL.";
+        }
+
         handled = true;
         const auto app = lowered.mid(5).trimmed();
         const bool ok = QProcess::startDetached(app, {});
         return ok ? ("Opening " + app + ".") : ("I couldn't open '" + app + "'.");
     }
 
-    if (lowered.startsWith("run ") && lowered.size() > 4) {
+    if (lowered.startsWith("search ") && lowered.size() > 7) {
         handled = true;
-        const auto cmd = text.mid(4).trimmed();
+        const auto query = text.mid(7).trimmed();
+        const auto encoded = QString(query).replace(" ", "+");
+        const auto url = "https://www.google.com/search?q=" + encoded;
+        const bool ok = QProcess::startDetached("xdg-open", {url});
+        return ok ? ("Searching web for: " + query) : "Could not launch web search.";
+    }
+
+    if (lowered.startsWith("close ") && lowered.size() > 6) {
+        handled = true;
+        const auto app = lowered.mid(6).trimmed();
+        const bool ok = QProcess::startDetached("bash", {"-lc", "pkill -f \"" + app + "\""});
+        return ok ? ("Attempting to close: " + app) : "Could not start close command.";
+    }
+
+    if ((lowered.startsWith("run ") && lowered.size() > 4) ||
+        (lowered.startsWith("execute ") && lowered.size() > 8)) {
+        handled = true;
+        const auto cmd = lowered.startsWith("execute ") ? text.mid(8).trimmed() : text.mid(4).trimmed();
         const bool ok = QProcess::startDetached("bash", {"-lc", cmd});
         return ok ? ("Running command: " + cmd) : "Command execution failed to start.";
     }
 
     if (lowered == "what can you control" || lowered == "apps") {
         handled = true;
-        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open <app>, run <command>.";
+        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open <app>, open https://..., search <query>, close <app>, run <command>.";
     }
 
     return {};
@@ -141,7 +166,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember context, summarize, answer questions, and run built-in tools. Try: remember ..., status, time, summarize, what do you remember.";
+        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try: open chrome, open vs code, open terminal, search linux c++, run ls, close chrome, remember ..., status, time.";
     }
 
     if (lowered.contains("status")) {
@@ -360,7 +385,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     auto* quick_btns_layout = new QHBoxLayout();
     quick_btns_layout->setSpacing(8);
     
-    QStringList quick_actions = {"💡 Help", "📊 Status", "🧠 Learn", "⚙️ Config", "🧹 Clear"};
+    QStringList quick_actions = {
+        "💡 Help", "📊 Status", "🧠 Learn", "⚙️ Config", "🧹 Clear",
+        "🌐 Chrome", "🧩 VS Code", "🖥 Terminal"
+    };
     auto btn_style = [](const QString& gradient_start, const QString& gradient_end) -> QString {
         return QString(
             "QPushButton {"
@@ -382,7 +410,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         {"#0f161a", "#1d4f66"},
         {"#151515", "#2a2a2a"},
         {"#141414", "#222222"},
-        {"#1a1117", "#2a1620"}
+        {"#1a1117", "#2a1620"},
+        {"#0f1a15", "#145a3f"},
+        {"#10141f", "#1e3c78"},
+        {"#1a1a1a", "#404040"}
     };
     
     std::vector<QPushButton*> quickButtons;
@@ -420,12 +451,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     QObject::connect(lockBtn, &QPushButton::clicked, this, [this]() { emit lockRequested(); });
 
-    if (quickButtons.size() >= 5) {
+    if (quickButtons.size() >= 8) {
         QObject::connect(quickButtons[0], &QPushButton::clicked, this, [this]() { runQuickAction("help"); });
         QObject::connect(quickButtons[1], &QPushButton::clicked, this, [this]() { runQuickAction("status"); });
         QObject::connect(quickButtons[2], &QPushButton::clicked, this, [this]() { runQuickAction("how can i learn faster?"); });
         QObject::connect(quickButtons[3], &QPushButton::clicked, this, [this]() { runQuickAction("what can you do?"); });
         QObject::connect(quickButtons[4], &QPushButton::clicked, this, [this]() { runQuickAction("clear"); });
+        QObject::connect(quickButtons[5], &QPushButton::clicked, this, [this]() { runQuickAction("open chrome"); });
+        QObject::connect(quickButtons[6], &QPushButton::clicked, this, [this]() { runQuickAction("open vs code"); });
+        QObject::connect(quickButtons[7], &QPushButton::clicked, this, [this]() { runQuickAction("open terminal"); });
     }
 
     // Welcome with styled text
