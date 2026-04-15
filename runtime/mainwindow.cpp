@@ -14,6 +14,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QFrame>
+#include <QFileInfo>
 
 #include <algorithm>
 
@@ -24,6 +25,87 @@ bool MainWindow::launchAny(const QStringList& executables, const QStringList& ar
         }
     }
     return false;
+}
+
+QString MainWindow::voiceDiagnostics() const {
+    auto hasCommand = [](const QString& cmd) {
+        QProcess proc;
+        proc.start("bash", {"-lc", "command -v " + cmd + " >/dev/null 2>&1"});
+        if (!proc.waitForFinished(3000)) {
+            proc.kill();
+            return false;
+        }
+        return proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0;
+    };
+
+    const bool hasArecord = hasCommand("arecord");
+    const bool hasPwRecord = hasCommand("pw-record");
+    const bool hasParec = hasCommand("parec");
+    const bool hasFfmpeg = hasCommand("ffmpeg");
+    const bool hasWhisperCli = hasCommand("whisper");
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir d(appDir);
+    d.cdUp(); // from build_gui -> project root
+    const QString rootDir = d.absolutePath();
+
+    QString pythonBin;
+    const QString venvLocal = rootDir + "/.venv/bin/python";
+    const QString venvParent = rootDir + "/../.venv/bin/python";
+
+    if (QFileInfo::exists(venvLocal) && QFileInfo(venvLocal).isExecutable()) {
+        pythonBin = venvLocal;
+    } else if (QFileInfo::exists(venvParent) && QFileInfo(venvParent).isExecutable()) {
+        pythonBin = venvParent;
+    } else if (hasCommand("python3")) {
+        pythonBin = "python3";
+    }
+
+    bool hasPythonWhisper = false;
+    if (!pythonBin.isEmpty()) {
+        QProcess pyProbe;
+        pyProbe.start(pythonBin, {"-c", "import whisper"});
+        if (pyProbe.waitForFinished(5000) &&
+            pyProbe.exitStatus() == QProcess::NormalExit &&
+            pyProbe.exitCode() == 0) {
+            hasPythonWhisper = true;
+        }
+    }
+
+    const QString activeRecorder =
+        hasArecord ? "arecord" :
+        (hasPwRecord ? "pw-record" :
+        (hasParec ? "parec" :
+        (hasFfmpeg ? "ffmpeg" : "none")));
+
+    const QString activeAsr =
+        hasWhisperCli ? "whisper CLI" :
+        (hasPythonWhisper ? "python openai-whisper" : "none");
+
+    QString report;
+    report += "Voice diagnostics:";
+    report += "\n• Recorder backends: arecord=" + QString(hasArecord ? "yes" : "no") +
+              ", pw-record=" + QString(hasPwRecord ? "yes" : "no") +
+              ", parec=" + QString(hasParec ? "yes" : "no") +
+              ", ffmpeg=" + QString(hasFfmpeg ? "yes" : "no");
+    report += "\n• ASR backends: whisper_cli=" + QString(hasWhisperCli ? "yes" : "no") +
+              ", python_whisper=" + QString(hasPythonWhisper ? "yes" : "no");
+    report += "\n• Active recorder candidate: " + activeRecorder;
+    report += "\n• Active ASR candidate: " + activeAsr;
+
+    if (!pythonBin.isEmpty()) {
+        report += "\n• Python path: " + pythonBin;
+    }
+
+    if (activeRecorder == "none") {
+        report += "\n• Fix: install one recorder backend (arecord / pw-record / parec / ffmpeg).";
+    }
+    if (activeAsr == "none") {
+        report += "\n• Fix: install whisper CLI or pip package openai-whisper in your venv.";
+    }
+
+    report += "\n• Tip: set CODEBEAT_PULSE_SOURCE to choose a specific mic source.";
+    return report;
 }
 
 QString MainWindow::captureVoiceCommand() {
@@ -112,9 +194,14 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
         return ok ? ("Running command: " + cmd) : "Command execution failed to start.";
     }
 
+    if (lowered == "voice status" || lowered == "voice check" || lowered == "mic status") {
+        handled = true;
+        return voiceDiagnostics();
+    }
+
     if (lowered == "what can you control" || lowered == "apps") {
         handled = true;
-        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open <app>, open https://..., search <query>, close <app>, run <command>.";
+        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open <app>, open https://..., search <query>, close <app>, run <command>, voice status.";
     }
 
     return {};
@@ -169,7 +256,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try: open chrome, open vs code, open terminal, search linux c++, run ls, close chrome, remember ..., status, time.";
+        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try: open chrome, open vs code, open terminal, search linux c++, run ls, close chrome, voice status, remember ..., status, time.";
     }
 
     if (lowered.contains("status")) {
@@ -489,7 +576,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     quick_btns_layout->setSpacing(8);
     
     QStringList quick_actions = {
-        "💡 Help", "📊 Status", "🧠 Learn", "⚙️ Config", "🧹 Clear",
+        "💡 Help", "📊 Status", "🧠 Learn", "🎙 Voice IO", "🧹 Clear",
         "🌐 Chrome", "🧩 VS Code", "🖥 Terminal"
     };
     auto btn_style = [](const QString& gradient_start, const QString& gradient_end) -> QString {
@@ -571,7 +658,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         QObject::connect(quickButtons[0], &QPushButton::clicked, this, [this]() { runQuickAction("help"); });
         QObject::connect(quickButtons[1], &QPushButton::clicked, this, [this]() { runQuickAction("status"); });
         QObject::connect(quickButtons[2], &QPushButton::clicked, this, [this]() { runQuickAction("how can i learn faster?"); });
-        QObject::connect(quickButtons[3], &QPushButton::clicked, this, [this]() { runQuickAction("what can you do?"); });
+        QObject::connect(quickButtons[3], &QPushButton::clicked, this, [this]() { runQuickAction("voice status"); });
         QObject::connect(quickButtons[4], &QPushButton::clicked, this, [this]() { runQuickAction("clear"); });
         QObject::connect(quickButtons[5], &QPushButton::clicked, this, [this]() { runQuickAction("open chrome"); });
         QObject::connect(quickButtons[6], &QPushButton::clicked, this, [this]() { runQuickAction("open vs code"); });
@@ -581,7 +668,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Welcome with styled text
     chatView_->append("<span style='color: #ff6b9d; font-weight: bold;'>[⚡ CODEBEAT]</span>");
     chatView_->append("<span style='color: #00ffff;'>System initialized and live. Good to see you.</span>");
-    chatView_->append("<span style='color: #8b3dff;'>Try: open chrome, open vs code, open terminal, run ls, help, or use 🎙 VOICE.</span>");
+    chatView_->append("<span style='color: #8b3dff;'>Try: open chrome, open vs code, open terminal, run ls, voice status, help, or use 🎙 VOICE.</span>");
     chatView_->append("");
 }
 

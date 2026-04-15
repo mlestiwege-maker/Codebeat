@@ -37,6 +37,7 @@ Inside Codebeat chat, you can now run:
 - `close <app_name>`
 - `run <shell_command>`
 - `execute <shell_command>`
+- `voice status`
 - `what can you control`
 
 Voice control:
@@ -47,6 +48,7 @@ Voice control:
 	2) transcriber: `whisper` CLI (or Python `openai-whisper` fallback)
 - Voice capture script: `./voice_recognize.sh` (records 4s and transcribes).
 - If voice fails, Codebeat now shows backend-specific error text in chat.
+- Run `voice status` in chat to see detected recorder/ASR backends and active candidates.
 
 Optional voice tuning env vars:
 

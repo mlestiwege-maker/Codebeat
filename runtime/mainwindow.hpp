@@ -30,6 +30,7 @@ private:
     void runQuickAction(const QString& text);
     QString tryHandleSystemTask(const QString& text, bool& handled);
     QString captureVoiceCommand();
+    QString voiceDiagnostics() const;
     static bool launchAny(const QStringList& executables, const QStringList& args = {});
     QString generateAssistantReply(const QString& text);
 
