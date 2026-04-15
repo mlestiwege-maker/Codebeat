@@ -43,15 +43,21 @@ Voice control:
 
 - Click `🎙 VOICE` in the main app and speak a command.
 - Linux voice backend order:
-	1) recorder: `arecord` (or `ffmpeg` fallback)
+	1) recorder: `arecord` -> `pw-record` -> `parec` -> `ffmpeg`
 	2) transcriber: `whisper` CLI (or Python `openai-whisper` fallback)
 - Voice capture script: `./voice_recognize.sh` (records 4s and transcribes).
 - If voice fails, Codebeat now shows backend-specific error text in chat.
 
+Optional voice tuning env vars:
+
+- `CODEBEAT_VOICE_SECONDS` (default: `4`)
+- `CODEBEAT_PULSE_SOURCE` (default: `default`) to pick a specific Pulse/PipeWire input source
+- `CODEBEAT_WHISPER_MODEL` (default: `tiny.en`) to choose whisper model (`tiny.en`, `base.en`, etc.)
+
 ## Optional dependencies for local voice + face fallback
 
 - Linux packages:
-	- `alsa-utils` (provides `arecord`) or `ffmpeg`
+	- at least one recorder backend: `alsa-utils` (`arecord`) or PipeWire (`pw-record`) or PulseAudio (`parec`) or `ffmpeg`
 - Python packages (in your project venv):
 	- `openai-whisper`
 	- `opencv-python`

@@ -35,7 +35,7 @@ QString MainWindow::captureVoiceCommand() {
     QProcess proc;
     proc.start("bash", {"-lc", "\"" + scriptPath + "\""});
 
-    if (!proc.waitForFinished(35000)) {
+    if (!proc.waitForFinished(300000)) {
         proc.kill();
         return "__VOICE_ERROR__Voice capture timed out";
     }
