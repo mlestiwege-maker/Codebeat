@@ -20,7 +20,7 @@ From-scratch C++ AI assistant project (tiny-first curriculum), with a Qt desktop
 - Enter wake word/passkey to unlock and enter the assistant.
 - Optional biometric button uses Linux face-auth in this order:
 	1) `howdy test` (if installed)
-	2) OpenCV camera fallback script (`./face_auth.sh` -> `runtime/face_auth.py`)
+	2) OpenCV owner-face verification fallback (`./face_auth.sh` -> `runtime/face_auth.py`)
 - In main app, click **LOCK** (or type `lock`) to return to splash access screen.
 - Black premium UI theme with neon accents.
 
@@ -55,6 +55,18 @@ Voice control:
 - Python packages (in your project venv):
 	- `openai-whisper`
 	- `opencv-python`
+
+## Enroll your face (owner-only unlock)
+
+Before OpenCV fallback biometric unlock can verify identity, enroll your face once:
+
+```bash
+./face_auth.sh --enroll
+```
+
+- This saves an owner profile at `data/processed/face_profile.npz`.
+- Biometric fallback unlock now checks **match against your enrolled profile**, not just "any detected face".
+- If no profile exists, face auth will instruct you to enroll first.
 
 ## How to run Codebeat
 
