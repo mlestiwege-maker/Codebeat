@@ -7,6 +7,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
+#include <QCoreApplication>
+#include <QDir>
 #include <QProcess>
 #include <QPushButton>
 #include <QScreen>
@@ -47,7 +49,7 @@ void SplashScreen::prepareForAuth() {
 
 void SplashScreen::setupAuthUi() {
     const auto os_user = qEnvironmentVariable("USER", "operator");
-    prompt_label_ = new QLabel("Welcome " + os_user + " • authenticate with passkey or biometrics", this);
+    prompt_label_ = new QLabel("Welcome " + os_user + " • Authenticate with passkey or biometrics", this);
     prompt_label_->setAlignment(Qt::AlignCenter);
     prompt_label_->setStyleSheet(
         "QLabel {"
@@ -170,10 +172,17 @@ void SplashScreen::onAuthenticate() {
 void SplashScreen::onBiometricAuthenticate() {
     updateStatus("Biometric scan in progress...");
 
-    // Linux face auth hook: uses Howdy if installed/configured.
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir d(appDir);
+    d.cdUp(); // from build_gui -> project root
+    const QString scriptPath = d.absoluteFilePath("face_auth.sh");
+
+    // Linux face auth hook:
+    // 1) howdy test if available
+    // 2) OpenCV python fallback
     QProcess proc;
-    proc.start("bash", {"-lc", "if command -v howdy >/dev/null 2>&1; then howdy test >/dev/null 2>&1; else exit 2; fi"});
-    const bool done = proc.waitForFinished(15000);
+    proc.start("bash", {"-lc", "\"" + scriptPath + "\""});
+    const bool done = proc.waitForFinished(18000);
 
     if (done && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
         updateStatus("Biometric authentication successful • entering system...");
@@ -185,11 +194,14 @@ void SplashScreen::onBiometricAuthenticate() {
         return;
     }
 
+    const auto err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+    const auto shortErr = err.isEmpty() ? QString("Face authentication unavailable/failed") : err.left(95);
+
     updateStatus("Biometric check unavailable or failed");
     feedback_label_->setStyleSheet(
         "QLabel { color: #ffcc66; font-family: 'Segoe UI', 'Calibri'; font-size: 11px; background: transparent; }"
     );
-    feedback_label_->setText("Face authentication unavailable/failed. Use passkey unlock.");
+    feedback_label_->setText(shortErr + " • use passkey unlock");
     auth_input_->setFocus();
 }
 

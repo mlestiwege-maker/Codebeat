@@ -37,11 +37,14 @@ QString MainWindow::captureVoiceCommand() {
 
     if (!proc.waitForFinished(35000)) {
         proc.kill();
-        return {};
+        return "__VOICE_ERROR__Voice capture timed out";
     }
 
     if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
-        return {};
+        const auto err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+        const auto reason = !err.isEmpty() ? err : (!out.isEmpty() ? out : QString("Voice recognition failed"));
+        return "__VOICE_ERROR__" + reason.left(170);
     }
 
     const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
@@ -548,6 +551,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     QObject::connect(voiceBtn, &QPushButton::clicked, this, [this]() {
         chatView_->append("<span style='color:#7fffcf;'>Codebeat:</span> Listening for voice command...");
         const auto heard = captureVoiceCommand();
+        if (heard.startsWith("__VOICE_ERROR__")) {
+            const auto reason = heard.mid(QString("__VOICE_ERROR__").size());
+            chatView_->append(QString("<span style='color:#ffcc66;'>Codebeat:</span> %1").arg(reason));
+            return;
+        }
         if (heard.isEmpty()) {
             chatView_->append("<span style='color:#ffcc66;'>Codebeat:</span> Voice recognition unavailable or no speech captured.");
             return;

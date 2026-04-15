@@ -18,7 +18,9 @@ From-scratch C++ AI assistant project (tiny-first curriculum), with a Qt desktop
 
 - App starts on splash access screen.
 - Enter wake word/passkey to unlock and enter the assistant.
-- Optional biometric button uses Linux face-auth hook (`howdy test`) if available.
+- Optional biometric button uses Linux face-auth in this order:
+	1) `howdy test` (if installed)
+	2) OpenCV camera fallback script (`./face_auth.sh` -> `runtime/face_auth.py`)
 - In main app, click **LOCK** (or type `lock`) to return to splash access screen.
 - Black premium UI theme with neon accents.
 
@@ -40,8 +42,19 @@ Inside Codebeat chat, you can now run:
 Voice control:
 
 - Click `🎙 VOICE` in the main app and speak a command.
-- Linux dependency for built-in voice path: `arecord` + `whisper` CLI.
+- Linux voice backend order:
+	1) recorder: `arecord` (or `ffmpeg` fallback)
+	2) transcriber: `whisper` CLI (or Python `openai-whisper` fallback)
 - Voice capture script: `./voice_recognize.sh` (records 4s and transcribes).
+- If voice fails, Codebeat now shows backend-specific error text in chat.
+
+## Optional dependencies for local voice + face fallback
+
+- Linux packages:
+	- `alsa-utils` (provides `arecord`) or `ffmpeg`
+- Python packages (in your project venv):
+	- `openai-whisper`
+	- `opencv-python`
 
 ## How to run Codebeat
 
