@@ -54,6 +54,7 @@ Voice control:
 - Voice decode now retries with normalized/boosted audio for low-volume microphone input.
 - If voice fails, Codebeat now shows backend-specific error text in chat.
 - Run `voice status` in chat to see detected recorder/ASR backends and active candidates.
+- Runtime replies now also consult `data/raw/corpus.txt` for lightweight local knowledge grounding.
 
 Optional voice tuning env vars:
 
@@ -67,6 +68,18 @@ Optional voice tuning env vars:
 - `CODEBEAT_FACE_THRESHOLD` (optional, default profile value `0.88`) to tune owner-match strictness
 
 These values can be set in `.env` at project root (auto-loaded by `voice_recognize.sh` and `face_auth.sh`).
+
+## Knowledge pack + corpus workflow
+
+- Add/edit topic files under `data/raw/knowledge/*.txt` (one fact/rule per line).
+- Rebuild merged training corpus:
+
+```bash
+./build_corpus.sh
+```
+
+- `./train.sh` now automatically runs corpus rebuild before training.
+- Runtime grounded replies read from `data/raw/corpus.txt`, so corpus updates affect both training and in-app knowledge retrieval.
 
 ## Optional dependencies for local voice + face fallback
 
@@ -159,6 +172,24 @@ Remove autostart entry:
 ./build_gui/codebeat_train
 ```
 
+Trainer options:
+
+```bash
+./build_gui/codebeat_train --epochs 20 --lr 0.005 --corpus data/raw/corpus.txt
+```
+
+Or via launcher:
+
+```bash
+./train.sh --epochs 20 --lr 0.005
+```
+
+Environment alternatives:
+
+- `CODEBEAT_TRAIN_EPOCHS`
+- `CODEBEAT_TRAIN_LR`
+- `CODEBEAT_TRAIN_CORPUS`
+
 ### 4) Run REPL
 
 ```bash
@@ -177,6 +208,7 @@ cmake --build build -j
 ### Training behavior
 
 - `codebeat_train` now performs real next-token learning on `data/raw/corpus.txt`.
+- Training is configurable through CLI flags/env vars (epochs, learning rate, corpus path).
 - It tokenizes text using byte-level encoding and trains over token pairs.
 - It updates token embeddings and output projection weights using gradient descent.
 - It reports per-epoch average loss and prints first/last loss trend.

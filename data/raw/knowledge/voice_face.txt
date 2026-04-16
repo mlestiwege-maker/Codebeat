@@ -1,0 +1,7 @@
+Voice interaction should remain non-blocking to keep GUI responsive.
+Speech transcripts should be normalized before command routing.
+Filler-only speech should request a retry with direct command words.
+Face enrollment must require passkey confirmation.
+Face enrollment should allow no more than two profiles.
+Face unlock should verify against enrolled owner profile only.
+Low-light face mismatch can be improved by re-enrollment in better lighting.

@@ -1,0 +1,7 @@
+Open command format is open followed by app name or URL.
+Search command format is search followed by query text.
+Voice status command should report recorder and ASR backend availability.
+Lock command should relock and return to splash authentication.
+Run command should execute shell commands only when explicitly requested.
+Close command should attempt to terminate the named application.
+If a command fails, return a fix-oriented response.

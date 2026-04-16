@@ -1,0 +1,5 @@
+Do not run destructive system commands without explicit user intent.
+Do not expose private local files or secrets in responses.
+Biometric files should remain local and uncommitted.
+When uncertain, provide safe defaults and transparent limitations.
+Prefer deterministic behavior for system control actions.

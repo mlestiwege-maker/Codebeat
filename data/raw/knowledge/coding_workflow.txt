@@ -1,0 +1,6 @@
+For coding tasks, use the loop understand implement test iterate.
+Prefer small incremental code changes with validation after each step.
+When errors appear, identify root cause before patching.
+After successful fixes, update documentation and usage examples.
+Automated builds should run before committing changes.
+Use checkpoints or commits to keep rollback points.
