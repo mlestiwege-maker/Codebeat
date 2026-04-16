@@ -12,9 +12,11 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QProcess>
+#include <QTimer>
 #include <QRegularExpression>
 #include <QFrame>
 #include <QFileInfo>
+#include <QProcess>
 
 #include <algorithm>
 
@@ -25,6 +27,89 @@ bool MainWindow::launchAny(const QStringList& executables, const QStringList& ar
         }
     }
     return false;
+}
+
+QString MainWindow::normalizeVoiceTranscript(const QString& text) {
+    QString t = text.trimmed();
+    if (t.isEmpty()) {
+        return t;
+    }
+
+    t = t.toLower();
+    t.replace(QRegularExpression("^[\\s\\p{P}]+|[\\s\\p{P}]+$"), "");
+    t.replace(QRegularExpression("^(codebeat|hey codebeat|okay codebeat|ok codebeat|hello codebeat)\\s*[,;:-]*\\s*"), "");
+    t.replace(QRegularExpression("^(and then|then|so|please)\\s+"), "");
+    t.replace(QRegularExpression("\\s+"), " ");
+
+    const QStringList fillerOnly = {
+        "and", "then", "so", "please", "okay", "ok", "uh", "um",
+        "and then", "okay then", "ok then"
+    };
+    if (fillerOnly.contains(t)) {
+        return {};
+    }
+
+    // Collapse repeated full command phrases from noisy ASR output.
+    t.replace(QRegularExpression("^(open terminal[\\s,]*){2,}$"), "open terminal");
+    t.replace(QRegularExpression("^(open chrome[\\s,]*){2,}$"), "open chrome");
+    t.replace(QRegularExpression("^(open vs code[\\s,]*){2,}$"), "open vs code");
+    t.replace(QRegularExpression("^(voice status[\\s,]*){2,}$"), "voice status");
+    t.replace(QRegularExpression("^(status[\\s,]*){2,}$"), "status");
+
+    if (t == "what time is it" || t == "whats the time" || t == "tell me the time") {
+        return "time";
+    }
+    if (t == "microphone status" || t == "voice health" || t == "mic health") {
+        return "voice status";
+    }
+
+    t.replace(QRegularExpression("^open (google )?chrome( browser)?$"), "open chrome");
+    t.replace(QRegularExpression("^open (v\\s*s|vs|visual studio) code$"), "open vs code");
+    t.replace(QRegularExpression("^open terminal( app)?$"), "open terminal");
+    t.replace(QRegularExpression("^search for "), "search ");
+
+    // Intent extraction from noisy/free-form ASR text.
+    const auto has = [&t](const QString& needle) { return t.contains(needle); };
+
+    if ((has("voice") || has("mic") || has("microphone")) && (has("status") || has("check") || has("health"))) {
+        return "voice status";
+    }
+    if (has("lock") || has("relock")) {
+        return "lock";
+    }
+    if (has("time") && (has("what") || has("tell") || has("current"))) {
+        return "time";
+    }
+
+    if (has("terminal")) {
+        return "open terminal";
+    }
+    if (has("chrome") || (has("browser") && has("open"))) {
+        return "open chrome";
+    }
+    if ((has("vs") && has("code")) || has("visual studio code") || has("vscode")) {
+        return "open vs code";
+    }
+
+    int sidx = t.indexOf("search ");
+    if (sidx >= 0) {
+        auto q = t.mid(sidx + 7).trimmed();
+        q.replace(QRegularExpression("^[\\p{P}\\s]+|[\\p{P}\\s]+$"), "");
+        if (!q.isEmpty()) {
+            return "search " + q;
+        }
+    }
+
+    if (has("status")) {
+        return "status";
+    }
+
+    if (t.startsWith("open terminal")) return "open terminal";
+    if (t.startsWith("open chrome")) return "open chrome";
+    if (t.startsWith("open vs code")) return "open vs code";
+    if (t.startsWith("voice status")) return "voice status";
+
+    return t.trimmed();
 }
 
 QString MainWindow::voiceDiagnostics() const {
@@ -140,6 +225,117 @@ QString MainWindow::captureVoiceCommand() {
 
     const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
     return out;
+}
+
+void MainWindow::finalizeVoiceCapture(QProcess* proc, int exitCode, QProcess::ExitStatus exitStatus) {
+    if (proc == nullptr || proc != activeVoiceProcess_) {
+        if (proc != nullptr) {
+            proc->deleteLater();
+        }
+        return;
+    }
+
+    activeVoiceProcess_ = nullptr;
+
+    if (voiceButton_ != nullptr) {
+        voiceButton_->setEnabled(true);
+        voiceButton_->setText("🎙 VOICE");
+    }
+    voiceCaptureInProgress_ = false;
+
+    if (exitStatus != QProcess::NormalExit || exitCode != 0) {
+        const auto err = QString::fromUtf8(proc->readAllStandardError()).trimmed();
+        const auto out = QString::fromUtf8(proc->readAllStandardOutput()).trimmed();
+        QString reason;
+        if (!err.isEmpty()) {
+            const auto lines = err.split('\n', Qt::SkipEmptyParts);
+            reason = lines.isEmpty() ? err : lines.back().trimmed();
+        } else if (!out.isEmpty()) {
+            const auto lines = out.split('\n', Qt::SkipEmptyParts);
+            reason = lines.isEmpty() ? out : lines.back().trimmed();
+        } else {
+            reason = "Voice recognition failed";
+        }
+        chatView_->append(QString("<span style='color:#ffcc66;'>Codebeat:</span> %1").arg(reason.left(220)));
+        proc->deleteLater();
+        return;
+    }
+
+    const auto heard = QString::fromUtf8(proc->readAllStandardOutput()).trimmed();
+    proc->deleteLater();
+
+    if (heard.isEmpty()) {
+        chatView_->append("<span style='color:#ffcc66;'>Codebeat:</span> Voice recognition unavailable or no speech captured.");
+        return;
+    }
+
+    const auto normalized = normalizeVoiceTranscript(heard);
+    if (normalized.trimmed().isEmpty()) {
+        chatView_->append("<span style='color:#ffcc66;'>Codebeat:</span> I heard audio but couldn't extract a command. Try saying: open terminal, open chrome, open vs code, status, or voice status.");
+        return;
+    }
+
+    input_->setText(normalized);
+    if (normalized != heard.trimmed()) {
+        chatView_->append(QString("<span style='color:#7fffcf;'>Codebeat:</span> Heard: %1 → %2").arg(heard, normalized));
+    } else {
+        chatView_->append(QString("<span style='color:#7fffcf;'>Codebeat:</span> Heard: %1").arg(heard));
+    }
+    onSend();
+}
+
+void MainWindow::startVoiceCapture() {
+    if (voiceCaptureInProgress_) {
+        chatView_->append("<span style='color:#ffcc66;'>Codebeat:</span> Voice capture already in progress...");
+        return;
+    }
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir d(appDir);
+    d.cdUp();
+    const QString scriptPath = d.absoluteFilePath("voice_recognize.sh");
+
+    auto* proc = new QProcess(this);
+    activeVoiceProcess_ = proc;
+    voiceCaptureInProgress_ = true;
+
+    if (voiceButton_ != nullptr) {
+        voiceButton_->setEnabled(false);
+        voiceButton_->setText("🎙 ...");
+    }
+
+    chatView_->append("<span style='color:#7fffcf;'>Codebeat:</span> Listening for voice command...");
+
+    QObject::connect(proc, &QProcess::finished, this,
+                     [this, proc](int exitCode, QProcess::ExitStatus exitStatus) {
+                         if (proc != activeVoiceProcess_ && !voiceCaptureInProgress_) {
+                             proc->deleteLater();
+                             return;
+                         }
+                         finalizeVoiceCapture(proc, exitCode, exitStatus);
+                     });
+
+    QObject::connect(proc, &QProcess::errorOccurred, this,
+                     [this, proc](QProcess::ProcessError) {
+                         if (!voiceCaptureInProgress_ || proc != activeVoiceProcess_) {
+                             proc->deleteLater();
+                             return;
+                         }
+                         finalizeVoiceCapture(proc, 1, QProcess::CrashExit);
+                     });
+
+    // Hard watchdog to avoid indefinite "Listening..." state on stuck backend.
+    QTimer::singleShot(90000, this, [this, proc]() {
+        if (!voiceCaptureInProgress_ || proc != activeVoiceProcess_) {
+            return;
+        }
+        if (proc->state() == QProcess::Running) {
+            proc->kill();
+            finalizeVoiceCapture(proc, 1, QProcess::CrashExit);
+        }
+    });
+
+    proc->start("bash", {"-lc", "\"" + scriptPath + "\""});
 }
 
 QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
@@ -550,6 +746,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         "}"
     );
     input_row->addWidget(voiceBtn);
+    voiceButton_ = voiceBtn;
 
     // Modern send button with hover effects
     auto* sendBtn = new QPushButton("▶ SEND", input_section);
@@ -644,23 +841,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     QObject::connect(cmd_open_code, &QPushButton::clicked, this, [this]() { runQuickAction("open vs code"); });
     QObject::connect(cmd_search_cpp, &QPushButton::clicked, this, [this]() { runQuickAction("search c++ qt tutorial"); });
     QObject::connect(cmd_status, &QPushButton::clicked, this, [this]() { runQuickAction("status"); });
-    QObject::connect(voiceBtn, &QPushButton::clicked, this, [this]() {
-        chatView_->append("<span style='color:#7fffcf;'>Codebeat:</span> Listening for voice command...");
-        const auto heard = captureVoiceCommand();
-        if (heard.startsWith("__VOICE_ERROR__")) {
-            const auto reason = heard.mid(QString("__VOICE_ERROR__").size());
-            chatView_->append(QString("<span style='color:#ffcc66;'>Codebeat:</span> %1").arg(reason));
-            return;
-        }
-        if (heard.isEmpty()) {
-            chatView_->append("<span style='color:#ffcc66;'>Codebeat:</span> Voice recognition unavailable or no speech captured.");
-            return;
-        }
-
-        input_->setText(heard);
-        chatView_->append(QString("<span style='color:#7fffcf;'>Codebeat:</span> Heard: %1").arg(heard));
-        onSend();
-    });
+    QObject::connect(voiceBtn, &QPushButton::clicked, this, [this]() { startVoiceCapture(); });
     QObject::connect(lockBtn, &QPushButton::clicked, this, [this]() { emit lockRequested(); });
 
     if (quickButtons.size() >= 8) {

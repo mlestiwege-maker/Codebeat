@@ -57,9 +57,12 @@ Voice control:
 
 Optional voice tuning env vars:
 
-- `CODEBEAT_VOICE_SECONDS` (default: `10`)
+- `CODEBEAT_VOICE_SECONDS` (default: `5`)
 - `CODEBEAT_PULSE_SOURCE` (default: `default`) to pick a specific Pulse/PipeWire input source
 - `CODEBEAT_WHISPER_MODEL` (default: `tiny.en`) to choose whisper model (`tiny.en`, `base.en`, etc.)
+- `CODEBEAT_VOICE_AUTO_SOURCE` (default: `1`) to auto-select the Pulse source with strongest voice signal
+- `CODEBEAT_VOICE_MIN_RMS` (default: `0.0025`) minimum signal floor used during source auto-selection
+- `CODEBEAT_VOICE_DEBUG` (default: `0`) set to `1` to print selected mic source and extra voice diagnostics to stderr
 - `CODEBEAT_CAMERA_INDEX` (default: `0`) to choose webcam index for face enroll/verify
 - `CODEBEAT_FACE_THRESHOLD` (optional, default profile value `0.88`) to tune owner-match strictness
 
@@ -95,7 +98,11 @@ Before OpenCV fallback biometric unlock can verify identity, enroll your face on
 	- Run `voice status` in chat and ensure at least one recorder + one ASR backend is available.
 	- Try a different mic source in `.env` (for PipeWire/Pulse systems this is often the fix):
 		- `CODEBEAT_PULSE_SOURCE=default` (or your explicit source name)
+	- Keep `CODEBEAT_VOICE_AUTO_SOURCE=1` so Codebeat auto-picks the strongest mic source.
+	- If mic is too quiet, lower `CODEBEAT_VOICE_MIN_RMS` slightly (for example `0.0018`).
+	- Set `CODEBEAT_VOICE_DEBUG=1` to inspect selected mic source in terminal diagnostics.
 	- Keep a clear 4-6s command and avoid starting with silence.
+	- Start directly with command words (e.g. `open terminal`) to avoid filler-only transcripts.
 - Face says profile missing:
 	- Run `./face_auth.sh --enroll` once to create `data/processed/face_profile.npz`.
 - Face cannot open camera:

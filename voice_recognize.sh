@@ -42,9 +42,12 @@ pick_python() {
 
 PYTHON_BIN="$(pick_python || true)"
 
-RECORD_SECS="${CODEBEAT_VOICE_SECONDS:-10}"
+RECORD_SECS="${CODEBEAT_VOICE_SECONDS:-5}"
 PULSE_SOURCE="${CODEBEAT_PULSE_SOURCE:-default}"
 WHISPER_MODEL="${CODEBEAT_WHISPER_MODEL:-tiny.en}"
+VOICE_AUTO_SOURCE="${CODEBEAT_VOICE_AUTO_SOURCE:-1}"
+VOICE_MIN_RMS="${CODEBEAT_VOICE_MIN_RMS:-0.0025}"
+VOICE_DEBUG="${CODEBEAT_VOICE_DEBUG:-0}"
 
 raw_to_wav() {
   local raw_path="$1"
@@ -68,7 +71,119 @@ with wave.open(wav_path, 'wb') as wf:
 PY
 }
 
+raw_rms() {
+  local raw_path="$1"
+  [[ -n "${PYTHON_BIN:-}" ]] || return 1
+  "$PYTHON_BIN" - "$raw_path" <<'PY'
+import sys
+import numpy as np
+
+raw_path = sys.argv[1]
+try:
+    b = open(raw_path, "rb").read()
+except Exception:
+    print("0.0")
+    raise SystemExit(0)
+
+if not b:
+    print("0.0")
+    raise SystemExit(0)
+
+arr = np.frombuffer(b, dtype=np.int16).astype(np.float32) / 32768.0
+if arr.size == 0:
+    print("0.0")
+    raise SystemExit(0)
+
+rms = float(np.sqrt(np.mean(np.square(arr))))
+print(f"{rms:.6f}")
+PY
+}
+
+pick_best_pulse_source() {
+  local fallback="$1"
+
+  if [[ "$VOICE_AUTO_SOURCE" != "1" ]]; then
+    echo "$fallback"
+    return 0
+  fi
+
+  if ! command -v pactl >/dev/null 2>&1 || ! command -v parec >/dev/null 2>&1; then
+    echo "$fallback"
+    return 0
+  fi
+
+  local best_src="$fallback"
+  local best_rms="0.0"
+  local probe_secs=2
+  local probe_bytes=$((probe_secs * 16000 * 2))
+
+  local candidates
+  candidates="default
+$(pactl list short sources 2>/dev/null | awk '{print $2}' | grep -v '\\.monitor$' | head -n 8)"
+
+  while IFS= read -r src; do
+    [[ -n "${src:-}" ]] || continue
+
+    if timeout "$((probe_secs + 2))" sh -c "parec --device '$src' --format=s16le --rate=16000 --channels=1 --latency-msec=50 | head -c $probe_bytes" > "$TMP_RAW" 2>/dev/null; then
+      if [[ -s "$TMP_RAW" ]]; then
+        local r
+        r="$(raw_rms "$TMP_RAW" 2>/dev/null || echo "0.0")"
+        if awk -v a="$r" -v b="$best_rms" 'BEGIN{exit !(a>b)}'; then
+          best_rms="$r"
+          best_src="$src"
+        fi
+      fi
+    fi
+  done <<< "$candidates"
+
+  if awk -v a="$best_rms" -v b="$VOICE_MIN_RMS" 'BEGIN{exit !(a>=b)}'; then
+    echo "$best_src"
+  else
+    echo "$fallback"
+  fi
+}
+
+record_with_parec() {
+  local source="$1"
+  local secs="$2"
+  local bytes
+  bytes=$((secs * 16000 * 2))
+
+  if timeout "$((secs + 2))" parec --device "$source" --format=s16le --rate=16000 --channels=1 --latency-msec=50 > "$TMP_RAW" 2>/dev/null; then
+    if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
+      return 0
+    fi
+  fi
+
+  if timeout "$((secs + 2))" parec --format=s16le --rate=16000 --channels=1 --latency-msec=50 > "$TMP_RAW" 2>/dev/null; then
+    if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
+      return 0
+    fi
+  fi
+
+  if timeout "$((secs + 2))" sh -c "parec --device '$source' --format=s16le --rate=16000 --channels=1 --latency-msec=50 | head -c $bytes" > "$TMP_RAW" 2>/dev/null; then
+    if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
+      return 0
+    fi
+  fi
+
+  if timeout "$((secs + 2))" sh -c "parec --format=s16le --rate=16000 --channels=1 --latency-msec=50 | head -c $bytes" > "$TMP_RAW" 2>/dev/null; then
+    if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 record_audio() {
+  local source
+  source="$(pick_best_pulse_source "$PULSE_SOURCE")"
+
+  if [[ "$VOICE_DEBUG" == "1" ]]; then
+    echo "[voice] selected_source=$source" >&2
+  fi
+
   # arecord (ALSA)
   if command -v arecord >/dev/null 2>&1; then
     arecord -q -f cd -t wav -d "$RECORD_SECS" "$TMP_WAV" && return 0
@@ -76,7 +191,7 @@ record_audio() {
 
   # PipeWire native recorder
   if command -v pw-record >/dev/null 2>&1; then
-    timeout "$((RECORD_SECS + 2))" pw-record --rate 16000 --channels 1 --format s16 --target "$PULSE_SOURCE" "$TMP_WAV" \
+    timeout "$((RECORD_SECS + 2))" pw-record --rate 16000 --channels 1 --format s16 --target "$source" "$TMP_WAV" \
       && return 0
     # Retry without explicit target if default alias is unsupported on some systems.
     timeout "$((RECORD_SECS + 2))" pw-record --rate 16000 --channels 1 --format s16 "$TMP_WAV" && return 0
@@ -84,39 +199,12 @@ record_audio() {
 
   # PulseAudio recorder (raw PCM -> wav via Python stdlib).
   if command -v parec >/dev/null 2>&1; then
-    local bytes
-    bytes=$((RECORD_SECS * 16000 * 2))
-
-    if timeout "$((RECORD_SECS + 2))" parec --device "$PULSE_SOURCE" --format=s16le --rate=16000 --channels=1 --latency-msec=50 > "$TMP_RAW" 2>/dev/null; then
-      if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
-        return 0
-      fi
-    fi
-
-    # Retry without explicit --device in case the configured source alias is invalid.
-    if timeout "$((RECORD_SECS + 2))" parec --format=s16le --rate=16000 --channels=1 --latency-msec=50 > "$TMP_RAW" 2>/dev/null; then
-      if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
-        return 0
-      fi
-    fi
-
-    # fallback that force-stops parec after needed bytes
-    if timeout "$((RECORD_SECS + 2))" sh -c "parec --device '$PULSE_SOURCE' --format=s16le --rate=16000 --channels=1 --latency-msec=50 | head -c $bytes" > "$TMP_RAW" 2>/dev/null; then
-      if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
-        return 0
-      fi
-    fi
-
-    if timeout "$((RECORD_SECS + 2))" sh -c "parec --format=s16le --rate=16000 --channels=1 --latency-msec=50 | head -c $bytes" > "$TMP_RAW" 2>/dev/null; then
-      if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
-        return 0
-      fi
-    fi
+    record_with_parec "$source" "$RECORD_SECS" && return 0
   fi
 
   # ffmpeg as last fallback.
   if command -v ffmpeg >/dev/null 2>&1; then
-    ffmpeg -loglevel error -f pulse -i "$PULSE_SOURCE" -t "$RECORD_SECS" -ac 1 -ar 16000 "$TMP_WAV" && return 0
+    ffmpeg -loglevel error -f pulse -i "$source" -t "$RECORD_SECS" -ac 1 -ar 16000 "$TMP_WAV" && return 0
   fi
 
   return 1
@@ -185,6 +273,16 @@ if framerate != target_rate and audio.size > 0:
 
 audio = np.clip(audio, -1.0, 1.0)
 
+# Trim long leading/trailing silence while preserving some context.
+if audio.size > 0:
+  mask = np.abs(audio) > 0.004
+  if np.any(mask):
+    idx = np.flatnonzero(mask)
+    pad = int(0.15 * target_rate)
+    start = max(0, int(idx[0]) - pad)
+    end = min(audio.size, int(idx[-1]) + pad)
+    audio = audio[start:end]
+
 model_name = os.environ.get("CODEBEAT_WHISPER_MODEL", "tiny.en")
 
 def _decode(model, arr, *, force_english):
@@ -193,9 +291,10 @@ def _decode(model, arr, *, force_english):
       "condition_on_previous_text": False,
       "fp16": False,
       "temperature": 0,
-      "no_speech_threshold": 0.25,
+        "no_speech_threshold": 0.70,
       "compression_ratio_threshold": 2.8,
-      "logprob_threshold": -1.2,
+        "logprob_threshold": -2.0,
+        "initial_prompt": "desktop voice commands: open chrome, open vs code, open terminal, search, run, close, status, lock",
   }
   if force_english:
     kwargs["language"] = "en"
@@ -218,6 +317,26 @@ try:
       gain = min(12.0, max(1.0, target_rms / max(rms, 1e-6)))
       work = np.clip(work * gain, -1.0, 1.0)
     text = _decode(model, work, force_english=False)
+
+  # Third pass: relaxed decode for difficult/noisy mic captures.
+  if not text:
+    work = np.copy(audio)
+    if rms > 0:
+      target_rms = 0.10
+      gain = min(18.0, max(1.0, target_rms / max(rms, 1e-6)))
+      work = np.clip(work * gain, -1.0, 1.0)
+    kwargs = {
+      "verbose": False,
+      "condition_on_previous_text": False,
+      "fp16": False,
+      "temperature": (0.0, 0.2, 0.4),
+      "no_speech_threshold": 1.0,
+      "compression_ratio_threshold": 3.0,
+      "logprob_threshold": -3.0,
+      "initial_prompt": "voice command",
+    }
+    result = model.transcribe(work, **kwargs)
+    text = (result.get("text") or "").strip()
 
   if text:
     print(text)
