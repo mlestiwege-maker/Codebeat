@@ -258,6 +258,60 @@ QString MainWindow::normalizeVoiceTranscript(const QString& text) {
     return t.trimmed();
 }
 
+QString MainWindow::loadSafetyPolicy() {
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir root(appDir);
+    root.cdUp();
+    const QString envFile = root.absoluteFilePath(".env");
+
+    qsizetype enabledPos = -1, confirmRunPos = -1, confirmExecPos = -1;
+    QString enabledValue = "1", confirmRunValue = "1", confirmExecValue = "1";
+
+    QFile f(envFile);
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        while (!f.atEnd()) {
+            const auto line = QString::fromUtf8(f.readLine()).trimmed();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            if (line.startsWith("CODEBEAT_SAFETY_MODE=")) {
+                enabledValue = line.mid(21).trimmed();
+            }
+            if (line.startsWith("CODEBEAT_CONFIRM_RUN=")) {
+                confirmRunValue = line.mid(21).trimmed();
+            }
+            if (line.startsWith("CODEBEAT_CONFIRM_EXECUTE=")) {
+                confirmExecValue = line.mid(25).trimmed();
+            }
+        }
+        f.close();
+    }
+
+    safety_mode_enabled_ = (enabledValue != "0" && enabledValue.toLower() != "false");
+    require_confirm_for_run_ = (confirmRunValue != "0" && confirmRunValue.toLower() != "false");
+    require_confirm_for_execute_ = (confirmExecValue != "0" && confirmExecValue.toLower() != "false");
+
+    return QString("Safety policy loaded: mode=%1, require_run_confirm=%2, require_exec_confirm=%3")
+            .arg(safety_mode_enabled_ ? "ON" : "OFF")
+            .arg(require_confirm_for_run_ ? "yes" : "no")
+            .arg(require_confirm_for_execute_ ? "yes" : "no");
+}
+
+bool MainWindow::requiresConfirmation(const QString& cmd) const {
+    if (!safety_mode_enabled_) return false;
+    
+    const auto lowered = cmd.trimmed().toLower();
+    if (lowered.startsWith("run ")) return require_confirm_for_run_;
+    if (lowered.startsWith("execute ")) return require_confirm_for_execute_;
+    return false;
+}
+
+bool MainWindow::isCommandAllowed(const QString& cmd, bool& needsConfirm) const {
+    needsConfirm = false;
+    if (!safety_mode_enabled_) return true;
+    
+    needsConfirm = requiresConfirmation(cmd);
+    return true;
+}
+
 QString MainWindow::voiceDiagnostics() const {
     auto hasCommand = [](const QString& cmd) {
         QProcess proc;
@@ -541,6 +595,21 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
         (lowered.startsWith("execute ") && lowered.size() > 8)) {
         handled = true;
         const auto cmd = lowered.startsWith("execute ") ? text.mid(8).trimmed() : text.mid(4).trimmed();
+        
+        bool needsConfirm = false;
+        if (!isCommandAllowed(text, needsConfirm)) {
+            return "This command is not allowed by safety policy.";
+        }
+        
+        if (needsConfirm && pending_confirmation_cmd_.isEmpty()) {
+            pending_confirmation_cmd_ = cmd;
+            return "Execute: " + cmd + "?\n\nReply 'yes' to confirm or 'no' to cancel.";
+        }
+        
+        if (needsConfirm && pending_confirmation_cmd_ == cmd) {
+            pending_confirmation_cmd_.clear();
+        }
+        
         const bool ok = QProcess::startDetached("bash", {"-lc", cmd});
         return ok ? ("Running command: " + cmd) : "Command execution failed to start.";
     }
@@ -589,6 +658,20 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     if (lowered == "knowledge status" || lowered == "knowledge count") {
         return "Knowledge entries loaded: " + QString::number(static_cast<int>(knowledge_corpus_.size())) +
                ". Add more with: learn: <fact>.";
+    }
+
+    if (!pending_confirmation_cmd_.isEmpty()) {
+        if (lowered == "yes" || lowered == "y" || lowered == "confirm") {
+            const auto cmdCopy = pending_confirmation_cmd_;
+            pending_confirmation_cmd_.clear();
+            const bool ok = QProcess::startDetached("bash", {"-lc", cmdCopy});
+            return ok ? ("Executing: " + cmdCopy) : "Command execution failed.";
+        }
+        if (lowered == "no" || lowered == "n" || lowered == "cancel") {
+            pending_confirmation_cmd_.clear();
+            return "Command canceled.";
+        }
+        return "Waiting for confirmation. Reply 'yes' or 'no'.";
     }
 
     bool handled = false;
@@ -827,6 +910,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     ensureKnowledgeLoaded();
+    loadSafetyPolicy();
     // Apply dark modern theme stylesheet
     setStyleSheet(
         "QMainWindow { background-color: #050505; }"

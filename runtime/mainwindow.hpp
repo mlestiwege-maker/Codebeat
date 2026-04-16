@@ -46,6 +46,9 @@ private:
     static QString normalizeVoiceTranscript(const QString& text);
     static bool launchAny(const QStringList& executables, const QStringList& args = {});
     QString generateAssistantReply(const QString& text);
+    bool isCommandAllowed(const QString& cmd, bool& needsConfirm) const;
+    QString loadSafetyPolicy();
+    bool requiresConfirmation(const QString& cmd) const;
 
     QTextEdit* chatView_{nullptr};
     QLineEdit* input_{nullptr};
@@ -61,6 +64,12 @@ private:
     codebeat::runtime::ConversationMemory memory_{};
     codebeat::runtime::Planner planner_{};
     codebeat::runtime::Tools tools_{};
+    QStringList safety_allowlist_{};
+    QStringList safety_denylist_{};
+    bool safety_mode_enabled_{true};
+    QString pending_confirmation_cmd_{};
+    bool require_confirm_for_run_{false};
+    bool require_confirm_for_execute_{false};
 };
 #else
 class MainWindow final {

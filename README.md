@@ -52,6 +52,22 @@ Inside Codebeat chat, you can now run:
 - `summarize: <text>`
 - `mode concise` / `mode detailed` / `mode status`
 
+### Safety guards for risky commands
+
+Tool-use commands like `run` and `execute` are protected by a **confirmation gate**:
+
+- When safety mode is enabled (`CODEBEAT_SAFETY_MODE=1` in `.env`), risky commands ask for user confirmation first.
+- Codebeat will respond with: "Execute: <cmd>?\n\nReply 'yes' to confirm or 'no' to cancel."
+- Reply with `yes`, `y`, or `confirm` to execute. Reply with `no`, `n`, or `cancel` to abort.
+- This prevents accidental script execution and maintains audit clarity (you always see _what_ Codebeat intends to run).
+- You can disable confirmation per-command via `.env`:
+	- `CODEBEAT_CONFIRM_RUN=0` to skip confirmation for `run <cmd>`
+	- `CODEBEAT_CONFIRM_EXECUTE=0` to skip confirmation for `execute <cmd>`
+	- `CODEBEAT_SAFETY_MODE=0` to disable all safety guards globally (not recommended).
+- `rewrite: <style>::<text>`
+- `summarize: <text>`
+- `mode concise` / `mode detailed` / `mode status`
+
 Voice control:
 
 - Click `🎙 VOICE` in the main app and speak a command.
@@ -63,6 +79,14 @@ Voice control:
 - If voice fails, Codebeat now shows backend-specific error text in chat.
 - Run `voice status` in chat to see detected recorder/ASR backends and active candidates.
 - Runtime replies now also consult `data/raw/corpus.txt` for lightweight local knowledge grounding.
+
+Optional safety policy tuning env vars:
+
+- `CODEBEAT_SAFETY_MODE` (default: `1`) Enable (1) or disable (0) all safety guards
+- `CODEBEAT_CONFIRM_RUN` (default: `1`) Require confirmation before executing `run <cmd>` (1=yes, 0=no)
+- `CODEBEAT_CONFIRM_EXECUTE` (default: `1`) Require confirmation before executing `execute <cmd>` (1=yes, 0=no)
+
+When confirmation is required, Codebeat will ask: "Execute: <cmd>?\n\nReply 'yes' to confirm or 'no' to cancel."
 
 Optional voice tuning env vars:
 
