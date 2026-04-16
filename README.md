@@ -22,6 +22,7 @@ From-scratch C++ AI assistant project (tiny-first curriculum), with a Qt desktop
 	1) `howdy test` (if installed)
 	2) OpenCV owner-face verification fallback (`./face_auth.sh` -> `runtime/face_auth.py`)
 - Splash screen also includes **Enroll Face** button (runs `./face_auth.sh --enroll`) so you can set owner profile without terminal.
+- Face enrollment from splash now requires entering the passkey/password first.
 - If `CODEBEAT_FACE_ONLY=1`, the splash auto-scans your face on startup and hides passkey unlock controls.
 - Face verification now probes available camera indexes and auto-picks the camera with the strongest face signal.
 - In main app, click **LOCK** (or type `lock`) to return to splash access screen.
@@ -81,6 +82,8 @@ Before OpenCV fallback biometric unlock can verify identity, enroll your face on
 ```
 
 - This saves an owner profile at `data/processed/face_profile.npz`.
+- You can enroll up to **2 face profiles max** (Android-style alternate appearance concept).
+- After `2/2` faces are enrolled, further enrollment is blocked and unlock continues by face scan only.
 - Enrollment now calibrates owner threshold from your captured samples (`p10 - margin`) for better real-world reliability.
 - Biometric fallback unlock now checks **match against your enrolled profile**, not just "any detected face".
 - If no profile exists, face auth will instruct you to enroll first.

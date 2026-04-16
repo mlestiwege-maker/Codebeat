@@ -16,14 +16,47 @@ def _profile_path() -> Path:
     return root / "data" / "processed" / "face_profile.npz"
 
 
-def _load_profile(path: Path) -> tuple[np.ndarray, dict] | tuple[None, None]:
+def _load_profile(path: Path) -> tuple[list[np.ndarray], dict] | tuple[None, None]:
     if not path.exists():
         return None, None
     data = np.load(str(path), allow_pickle=True)
-    descriptor = data.get("descriptor")
-    if descriptor is None:
+
+    descriptors: list[np.ndarray] = []
+
+    # Backward compatibility for old single-descriptor profiles.
+    single = data.get("descriptor")
+    if single is not None:
+        s = np.asarray(single, dtype=np.float32).reshape(-1)
+        if s.size > 0:
+            n = float(np.linalg.norm(s))
+            if n > 1e-8:
+                descriptors.append(s / n)
+
+    many = data.get("descriptors")
+    if many is not None:
+        arr = np.asarray(many, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        for row in arr:
+            r = np.asarray(row, dtype=np.float32).reshape(-1)
+            if r.size == 0:
+                continue
+            n = float(np.linalg.norm(r))
+            if n > 1e-8:
+                descriptors.append(r / n)
+
+    if not descriptors:
         return None, None
-    descriptor = np.asarray(descriptor, dtype=np.float32).reshape(-1)
+
+    # Deduplicate in case mixed-format saves included same profile twice.
+    dedup: list[np.ndarray] = []
+    for d in descriptors:
+        if not dedup:
+            dedup.append(d)
+            continue
+        if all(float(np.dot(d, x)) < 0.9999 for x in dedup):
+            dedup.append(d)
+
     meta = {}
     meta_blob = data.get("meta")
     if meta_blob is not None:
@@ -31,7 +64,7 @@ def _load_profile(path: Path) -> tuple[np.ndarray, dict] | tuple[None, None]:
             meta = json.loads(str(meta_blob.item()))
         except Exception:
             meta = {}
-    return descriptor, meta
+    return dedup, meta
 
 
 def _extract_descriptor(gray: np.ndarray, cascade: cv2.CascadeClassifier) -> np.ndarray | None:
@@ -149,8 +182,8 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 def main() -> int:
     profile_file = _profile_path()
-    enrolled_desc, meta = _load_profile(profile_file)
-    if enrolled_desc is None:
+    enrolled_descs, meta = _load_profile(profile_file)
+    if enrolled_descs is None:
         print(
             "No enrolled owner face profile found. Run: ./face_auth.sh --enroll",
             file=sys.stderr,
@@ -207,7 +240,7 @@ def main() -> int:
                 matched_frames = max(0, matched_frames - 1)
                 continue
 
-            score = _cosine_similarity(enrolled_desc, live_desc)
+            score = max(_cosine_similarity(d, live_desc) for d in enrolled_descs)
             if score > best_score:
                 best_score = score
 

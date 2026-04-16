@@ -9,6 +9,7 @@
 #include <QPainter>
 #include <QCoreApplication>
 #include <QDir>
+#include <QInputDialog>
 #include <QProcess>
 #include <QPushButton>
 #include <QScreen>
@@ -279,6 +280,27 @@ void SplashScreen::onBiometricAuthenticate() {
 }
 
 void SplashScreen::onEnrollFace() {
+    bool ok = false;
+    const QString pass = QInputDialog::getText(
+        this,
+        "Authorize Face Enrollment",
+        "Enter passkey to enroll face:",
+        QLineEdit::Password,
+        QString(),
+        &ok);
+
+    if (!ok) {
+        return;
+    }
+
+    if (!isValidAccessKey(pass)) {
+        feedback_label_->setStyleSheet(
+            "QLabel { color: #ff86b6; font-family: 'Segoe UI', 'Calibri'; font-size: 11px; background: transparent; }"
+        );
+        feedback_label_->setText("Invalid passkey. Face enrollment denied.");
+        return;
+    }
+
     updateStatus("Face enrollment started... look at camera");
 
     const QString appDir = QCoreApplication::applicationDirPath();
@@ -304,6 +326,10 @@ void SplashScreen::onEnrollFace() {
     const auto lines = shortErr.split('\n', Qt::SkipEmptyParts);
     if (!lines.isEmpty()) {
         shortErr = lines.back().trimmed();
+    }
+
+    if (shortErr.contains("already enrolled", Qt::CaseInsensitive) || proc.exitCode() == 15) {
+        shortErr = "Face enrollment limit reached (2/2). Face unlock is active; no more enrollment.";
     }
 
     updateStatus("Face enrollment unavailable or failed");

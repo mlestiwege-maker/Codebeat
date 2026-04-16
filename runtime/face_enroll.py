@@ -18,6 +18,55 @@ def _profile_path() -> Path:
     return out / "face_profile.npz"
 
 
+def _load_existing_profile(path: Path) -> tuple[list[np.ndarray], dict]:
+    if not path.exists():
+        return [], {}
+
+    data = np.load(str(path), allow_pickle=True)
+    meta: dict = {}
+    meta_blob = data.get("meta")
+    if meta_blob is not None:
+        try:
+            meta = json.loads(str(meta_blob.item()))
+        except Exception:
+            meta = {}
+
+    descriptors: list[np.ndarray] = []
+
+    # Backward compatibility with old single-descriptor profiles.
+    single = data.get("descriptor")
+    if single is not None:
+        s = np.asarray(single, dtype=np.float32).reshape(-1)
+        if s.size > 0:
+            n = float(np.linalg.norm(s))
+            if n > 1e-8:
+                descriptors.append(s / n)
+
+    many = data.get("descriptors")
+    if many is not None:
+        arr = np.asarray(many, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        for row in arr:
+            r = np.asarray(row, dtype=np.float32).reshape(-1)
+            if r.size == 0:
+                continue
+            n = float(np.linalg.norm(r))
+            if n > 1e-8:
+                descriptors.append(r / n)
+
+    # Deduplicate any overlap from mixed old/new saves.
+    dedup: list[np.ndarray] = []
+    for d in descriptors:
+        if not dedup:
+            dedup.append(d)
+            continue
+        if all(float(np.dot(d, x)) < 0.9999 for x in dedup):
+            dedup.append(d)
+
+    return dedup, meta
+
+
 def _detect_faces(gray: np.ndarray, cascade: cv2.CascadeClassifier):
     # Multi-pass detect to be more tolerant to lighting/angle variation.
     passes = [
@@ -134,6 +183,18 @@ def main() -> int:
         print("Could not load OpenCV face cascade.", file=sys.stderr)
         return 2
 
+    profile_path = _profile_path()
+    existing_descriptors, existing_meta = _load_existing_profile(profile_path)
+    max_faces = 2
+
+    if len(existing_descriptors) >= max_faces:
+        print(
+            f"Enrollment blocked: already enrolled {len(existing_descriptors)}/{max_faces} faces. "
+            "Face unlock is active; additional enrollments are disabled.",
+            file=sys.stderr,
+        )
+        return 15
+
     requested_idx = os.environ.get("CODEBEAT_CAMERA_INDEX", "").strip()
     camera_candidates: list[int] = []
     if requested_idx:
@@ -204,17 +265,35 @@ def main() -> int:
         p10 = float(np.percentile(sims_arr, 10)) if sims_arr.size else 0.88
         calibrated_threshold = max(0.72, min(0.90, p10 - 0.10))
 
-        profile_path = _profile_path()
+        all_descriptors = list(existing_descriptors)
+        all_descriptors.append(mean_desc)
+        all_stack = np.stack(all_descriptors, axis=0).astype(np.float32)
+
+        existing_threshold = None
+        if isinstance(existing_meta, dict):
+            try:
+                existing_threshold = float(existing_meta.get("threshold"))
+            except Exception:
+                existing_threshold = None
+        final_threshold = calibrated_threshold if existing_threshold is None else min(calibrated_threshold, existing_threshold)
+
         meta = {
             "created_at": int(time.time()),
             "samples": len(descriptors),
-            "threshold": calibrated_threshold,
-            "method": "opencv_haar_hog_cosine",
+            "threshold": final_threshold,
+            "method": "opencv_haar_hog_cosine_multi",
+            "max_faces": max_faces,
+            "enrolled_faces": int(all_stack.shape[0]),
         }
-        np.savez_compressed(profile_path, descriptor=mean_desc, meta=json.dumps(meta))
+        np.savez_compressed(
+            profile_path,
+            descriptor=all_stack[0],  # compatibility for old readers
+            descriptors=all_stack,
+            meta=json.dumps(meta),
+        )
         print(
             f"Enrollment complete. Owner face profile saved to: {profile_path} "
-            f"(threshold={calibrated_threshold:.3f}, p10={p10:.3f})"
+            f"(faces={all_stack.shape[0]}/{max_faces}, threshold={final_threshold:.3f}, p10={p10:.3f})"
         )
         return 0
     finally:
