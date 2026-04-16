@@ -43,6 +43,8 @@ Inside Codebeat chat, you can now run:
 - `execute <shell_command>`
 - `voice status`
 - `what can you control`
+- `learn: <fact>`
+- `knowledge status`
 
 Voice control:
 
@@ -72,6 +74,7 @@ These values can be set in `.env` at project root (auto-loaded by `voice_recogni
 ## Knowledge pack + corpus workflow
 
 - Add/edit topic files under `data/raw/knowledge/*.txt` (one fact/rule per line).
+- You can also teach from chat in GUI: `learn: <fact>` (saved to `data/raw/knowledge/user_facts.txt` and appended to `data/raw/corpus.txt`).
 - Rebuild merged training corpus:
 
 ```bash

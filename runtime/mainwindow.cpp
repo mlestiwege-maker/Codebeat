@@ -16,6 +16,8 @@
 #include <QRegularExpression>
 #include <QFrame>
 #include <QFileInfo>
+#include <QFile>
+#include <QTextStream>
 #include <QProcess>
 
 #include <algorithm>
@@ -27,6 +29,149 @@ bool MainWindow::launchAny(const QStringList& executables, const QStringList& ar
         }
     }
     return false;
+}
+
+QString MainWindow::normalizeKnowledgeFact(const QString& text) {
+    QString out = text;
+    out.replace(QRegularExpression("[\r\n]+"), " ");
+    out.replace(QRegularExpression("\\s+"), " ");
+    out = out.trimmed();
+    if (out.endsWith(".")) {
+        return out;
+    }
+    return out + ".";
+}
+
+QString MainWindow::learnKnowledgeFact(const QString& rawFact) {
+    const auto fact = normalizeKnowledgeFact(rawFact);
+    if (fact.isEmpty() || fact == ".") {
+        return "Usage: learn: <fact>. Example: learn: Codebeat should ask clarifying questions only when needed.";
+    }
+
+    for (const auto& existing : knowledge_corpus_) {
+        if (existing.compare(fact, Qt::CaseInsensitive) == 0) {
+            return "I already know that fact. No duplicate added.";
+        }
+    }
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir root(appDir);
+    root.cdUp();
+
+    const QString knowledgeDir = root.absoluteFilePath("data/raw/knowledge");
+    QDir().mkpath(knowledgeDir);
+
+    const QString learnFile = root.absoluteFilePath("data/raw/knowledge/user_facts.txt");
+    const QString corpusFile = root.absoluteFilePath("data/raw/corpus.txt");
+
+    auto appendLine = [&fact](const QString& path) -> bool {
+        QFile f(path);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+            return false;
+        }
+        QTextStream out(&f);
+        out << fact << "\n";
+        return true;
+    };
+
+    if (!appendLine(learnFile)) {
+        return "I couldn't save that fact to knowledge storage.";
+    }
+    if (!appendLine(corpusFile)) {
+        return "I saved the fact to knowledge file, but updating corpus.txt failed.";
+    }
+
+    knowledge_corpus_.push_back(fact);
+    return "Learned and saved: \"" + fact + "\"";
+}
+
+QStringList MainWindow::splitKeywords(const QString& text) {
+    QString cleaned = text.toLower();
+    cleaned.replace(QRegularExpression("[^a-z0-9\\s]"), " ");
+    cleaned.replace(QRegularExpression("\\s+"), " ");
+    cleaned = cleaned.trimmed();
+
+    if (cleaned.isEmpty()) {
+        return {};
+    }
+
+    const QStringList stopwords = {
+        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from",
+        "how", "i", "in", "is", "it", "me", "my", "of", "on", "or", "that", "the",
+        "this", "to", "we", "what", "when", "where", "who", "why", "with", "you", "your",
+        "can", "could", "should", "would", "do", "does", "did", "tell", "explain", "about"
+    };
+
+    QStringList out;
+    for (const auto& tok : cleaned.split(' ', Qt::SkipEmptyParts)) {
+        if (tok.size() >= 2 && !stopwords.contains(tok)) {
+            out.push_back(tok);
+        }
+    }
+    return out;
+}
+
+void MainWindow::ensureKnowledgeLoaded() {
+    if (knowledge_loaded_) {
+        return;
+    }
+    knowledge_loaded_ = true;
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir d(appDir);
+    d.cdUp();
+    const QString corpusPath = d.absoluteFilePath("data/raw/corpus.txt");
+
+    QFile f(corpusPath);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return;
+    }
+
+    QTextStream in(&f);
+    while (!in.atEnd()) {
+        const auto line = in.readLine().trimmed();
+        if (!line.isEmpty()) {
+            knowledge_corpus_.push_back(line);
+        }
+    }
+}
+
+QString MainWindow::retrieveKnowledgeReply(const QString& query) const {
+    if (knowledge_corpus_.empty()) {
+        return {};
+    }
+
+    const auto qk = splitKeywords(query);
+    if (qk.isEmpty()) {
+        return {};
+    }
+
+    int bestScore = 0;
+    QString bestLine;
+    for (const auto& line : knowledge_corpus_) {
+        const auto lk = splitKeywords(line);
+        if (lk.isEmpty()) {
+            continue;
+        }
+
+        int score = 0;
+        for (const auto& q : qk) {
+            if (lk.contains(q)) {
+                ++score;
+            }
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestLine = line;
+        }
+    }
+
+    if (bestScore <= 0 || bestLine.isEmpty()) {
+        return {};
+    }
+
+    return "From my local knowledge: " + bestLine;
 }
 
 QString MainWindow::normalizeVoiceTranscript(const QString& text) {
@@ -418,7 +563,20 @@ void MainWindow::runQuickAction(const QString& text) {
 }
 
 QString MainWindow::generateAssistantReply(const QString& text) {
+    ensureKnowledgeLoaded();
     const auto lowered = text.trimmed().toLower();
+
+    if (lowered.startsWith("learn:") || lowered.startsWith("learn ")) {
+        const auto fact = lowered.startsWith("learn:")
+                              ? text.mid(text.indexOf(':') + 1)
+                              : text.mid(6);
+        return learnKnowledgeFact(fact);
+    }
+
+    if (lowered == "knowledge status" || lowered == "knowledge count") {
+        return "Knowledge entries loaded: " + QString::number(static_cast<int>(knowledge_corpus_.size())) +
+               ". Add more with: learn: <fact>.";
+    }
 
     bool handled = false;
     const auto taskReply = tryHandleSystemTask(text, handled);
@@ -461,7 +619,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try: open chrome, open vs code, open terminal, search linux c++, run ls, close chrome, voice status, remember ..., status, time.";
+        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try: open chrome, open vs code, open terminal, search linux c++, run ls, close chrome, voice status, learn: Codebeat should be concise, knowledge status, remember ..., status, time.";
     }
 
     if (lowered.contains("status")) {
@@ -492,6 +650,11 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (text.trimmed().endsWith('?')) {
+        const auto grounded = retrieveKnowledgeReply(text);
+        if (!grounded.isEmpty()) {
+            return grounded;
+        }
+
         if (lowered.contains("who are you")) {
             return "I’m your Codebeat assistant. I can help you think through ideas, code tasks, and keep context while we chat.";
         }
@@ -504,10 +667,16 @@ QString MainWindow::generateAssistantReply(const QString& text) {
         return "Good question. Based on our context, I’d solve it incrementally and verify each step. If you want, I can do that with you now.";
     }
 
+    const auto grounded = retrieveKnowledgeReply(text);
+    if (!grounded.isEmpty()) {
+        return grounded;
+    }
+
     return "Understood. My take: " + text + "\nIf you want, I can break that into concrete next steps.";
 }
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+    ensureKnowledgeLoaded();
     // Apply dark modern theme stylesheet
     setStyleSheet(
         "QMainWindow { background-color: #050505; }"

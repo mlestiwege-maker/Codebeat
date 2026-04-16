@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <QProcess>
 #include <QString>
+#include <QStringList>
 
 #include "runtime/memory.hpp"
 #include "runtime/tools.hpp"
@@ -30,6 +31,11 @@ private slots:
     void onSend();
 
 private:
+    void ensureKnowledgeLoaded();
+    QString retrieveKnowledgeReply(const QString& query) const;
+    QString learnKnowledgeFact(const QString& rawFact);
+    static QString normalizeKnowledgeFact(const QString& text);
+    static QStringList splitKeywords(const QString& text);
     void runQuickAction(const QString& text);
     QString tryHandleSystemTask(const QString& text, bool& handled);
     void startVoiceCapture();
@@ -46,6 +52,8 @@ private:
     bool voiceCaptureInProgress_{false};
     QProcess* activeVoiceProcess_{nullptr};
     std::vector<QString> notes_{};
+    std::vector<QString> knowledge_corpus_{};
+    bool knowledge_loaded_{false};
     QString last_user_message_{};
     int interaction_count_{0};
     codebeat::runtime::ConversationMemory memory_{};
