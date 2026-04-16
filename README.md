@@ -23,6 +23,7 @@ From-scratch C++ AI assistant project (tiny-first curriculum), with a Qt desktop
 	2) OpenCV owner-face verification fallback (`./face_auth.sh` -> `runtime/face_auth.py`)
 - Splash screen also includes **Enroll Face** button (runs `./face_auth.sh --enroll`) so you can set owner profile without terminal.
 - If `CODEBEAT_FACE_ONLY=1`, the splash auto-scans your face on startup and hides passkey unlock controls.
+- Face verification now probes available camera indexes and auto-picks the camera with the strongest face signal.
 - In main app, click **LOCK** (or type `lock`) to return to splash access screen.
 - Black premium UI theme with neon accents.
 
@@ -59,6 +60,7 @@ Optional voice tuning env vars:
 - `CODEBEAT_PULSE_SOURCE` (default: `default`) to pick a specific Pulse/PipeWire input source
 - `CODEBEAT_WHISPER_MODEL` (default: `tiny.en`) to choose whisper model (`tiny.en`, `base.en`, etc.)
 - `CODEBEAT_CAMERA_INDEX` (default: `0`) to choose webcam index for face enroll/verify
+- `CODEBEAT_FACE_THRESHOLD` (optional, default profile value `0.88`) to tune owner-match strictness
 
 These values can be set in `.env` at project root (auto-loaded by `voice_recognize.sh` and `face_auth.sh`).
 
@@ -79,6 +81,7 @@ Before OpenCV fallback biometric unlock can verify identity, enroll your face on
 ```
 
 - This saves an owner profile at `data/processed/face_profile.npz`.
+- Enrollment now calibrates owner threshold from your captured samples (`p10 - margin`) for better real-world reliability.
 - Biometric fallback unlock now checks **match against your enrolled profile**, not just "any detected face".
 - If no profile exists, face auth will instruct you to enroll first.
 - If Howdy is installed but fails, Codebeat now automatically falls back to OpenCV verification.
@@ -96,6 +99,10 @@ Before OpenCV fallback biometric unlock can verify identity, enroll your face on
 	- Set `CODEBEAT_CAMERA_INDEX` in `.env` to `0`, `1`, or `2` based on your webcam.
 - Face unlock feels slow:
 	- Keep `CODEBEAT_FACE_ONLY=1` enabled so the app auto-starts face scanning.
+- Face unlock rejects too often:
+	- Improve lighting and re-enroll once.
+	- Optionally lower `CODEBEAT_FACE_THRESHOLD` slightly (e.g. `0.86`) in `.env`.
+	- When threshold is lower than `0.80`, Codebeat automatically requires more consecutive owner matches.
 
 ## How to run Codebeat
 

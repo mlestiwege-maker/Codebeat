@@ -5,6 +5,8 @@ import sys
 import time
 from pathlib import Path
 
+os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
+
 import cv2
 import numpy as np
 
@@ -33,7 +35,7 @@ def _load_profile(path: Path) -> tuple[np.ndarray, dict] | tuple[None, None]:
 
 
 def _extract_descriptor(gray: np.ndarray, cascade: cv2.CascadeClassifier) -> np.ndarray | None:
-    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=6, minSize=(90, 90))
+    faces = _detect_faces(gray, cascade)
     if len(faces) == 0:
         return None
 
@@ -64,6 +66,81 @@ def _extract_descriptor(gray: np.ndarray, cascade: cv2.CascadeClassifier) -> np.
     return desc / norm
 
 
+def _detect_faces(gray: np.ndarray, cascade: cv2.CascadeClassifier):
+    passes = [
+        (1.10, 6, (90, 90)),
+        (1.08, 5, (72, 72)),
+        (1.06, 4, (56, 56)),
+    ]
+
+    for scale, neighbors, min_size in passes:
+        faces = cascade.detectMultiScale(
+            gray,
+            scaleFactor=scale,
+            minNeighbors=neighbors,
+            minSize=min_size,
+        )
+        if len(faces) > 0:
+            return faces
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    for scale, neighbors, min_size in passes:
+        faces = cascade.detectMultiScale(
+            enhanced,
+            scaleFactor=scale,
+            minNeighbors=max(3, neighbors - 1),
+            minSize=min_size,
+        )
+        if len(faces) > 0:
+            return faces
+
+    return []
+
+
+def _open_best_camera(camera_candidates: list[int], cascade: cv2.CascadeClassifier):
+    best = None
+    best_idx = None
+    best_score = -1.0
+    best_hits = 0
+
+    for idx in camera_candidates:
+        if not Path(f"/dev/video{idx}").exists():
+            continue
+        cap = cv2.VideoCapture(idx)
+        if not cap.isOpened():
+            cap.release()
+            continue
+
+        hits = 0
+        sharp_sum = 0.0
+        sampled = 0
+        for _ in range(12):
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            sampled += 1
+            if len(_detect_faces(gray, cascade)) > 0:
+                hits += 1
+            sharp_sum += float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+        avg_sharp = (sharp_sum / sampled) if sampled > 0 else 0.0
+        score = hits * 1000.0 + avg_sharp
+
+        if score > best_score:
+            if best is not None:
+                best.release()
+            best = cap
+            best_idx = idx
+            best_score = score
+            best_hits = hits
+        else:
+            cap.release()
+
+    return best, best_idx, best_hits
+
+
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     if a.shape != b.shape:
         return -1.0
@@ -81,6 +158,12 @@ def main() -> int:
         return 14
 
     threshold = float(meta.get("threshold", 0.88)) if isinstance(meta, dict) else 0.88
+    env_threshold = os.environ.get("CODEBEAT_FACE_THRESHOLD", "").strip()
+    if env_threshold:
+        try:
+            threshold = float(env_threshold)
+        except ValueError:
+            pass
 
     cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     cascade = cv2.CascadeClassifier(cascade_path)
@@ -99,15 +182,7 @@ def main() -> int:
         if idx not in camera_candidates:
             camera_candidates.append(idx)
 
-    cap = None
-    opened_idx = None
-    for idx in camera_candidates:
-        candidate = cv2.VideoCapture(idx)
-        if candidate.isOpened():
-            cap = candidate
-            opened_idx = idx
-            break
-        candidate.release()
+    cap, opened_idx, probe_hits = _open_best_camera(camera_candidates, cascade)
 
     if cap is None:
         tried = ", ".join(str(i) for i in camera_candidates)
@@ -117,7 +192,7 @@ def main() -> int:
     timeout_sec = 8.0
     deadline = time.time() + timeout_sec
     matched_frames = 0
-    required_matches = 2
+    required_matches = 3 if threshold < 0.80 else 2
     best_score = -1.0
 
     try:
@@ -139,7 +214,7 @@ def main() -> int:
             if score >= threshold:
                 matched_frames += 1
                 if matched_frames >= required_matches:
-                    print(f"Owner face recognized (camera {opened_idx})")
+                    print(f"Owner face recognized (camera {opened_idx}, probe_face_hits={probe_hits}/12)")
                     return 0
             else:
                 # Decay quickly so non-owner or unstable frames cannot pass.
