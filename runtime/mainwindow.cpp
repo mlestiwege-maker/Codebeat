@@ -125,7 +125,16 @@ QString MainWindow::captureVoiceCommand() {
     if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
         const auto err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
         const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
-        const auto reason = !err.isEmpty() ? err : (!out.isEmpty() ? out : QString("Voice recognition failed"));
+        QString reason;
+        if (!err.isEmpty()) {
+            const auto lines = err.split('\n', Qt::SkipEmptyParts);
+            reason = lines.isEmpty() ? err : lines.back().trimmed();
+        } else if (!out.isEmpty()) {
+            const auto lines = out.split('\n', Qt::SkipEmptyParts);
+            reason = lines.isEmpty() ? out : lines.back().trimmed();
+        } else {
+            reason = "Voice recognition failed";
+        }
         return "__VOICE_ERROR__" + reason.left(170);
     }
 

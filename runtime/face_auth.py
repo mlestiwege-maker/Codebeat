@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -87,15 +88,36 @@ def main() -> int:
         print("Could not load OpenCV face cascade.", file=sys.stderr)
         return 2
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Could not open camera device 0.", file=sys.stderr)
+    requested_idx = os.environ.get("CODEBEAT_CAMERA_INDEX", "").strip()
+    camera_candidates: list[int] = []
+    if requested_idx:
+        try:
+            camera_candidates.append(int(requested_idx))
+        except ValueError:
+            pass
+    for idx in (0, 1, 2):
+        if idx not in camera_candidates:
+            camera_candidates.append(idx)
+
+    cap = None
+    opened_idx = None
+    for idx in camera_candidates:
+        candidate = cv2.VideoCapture(idx)
+        if candidate.isOpened():
+            cap = candidate
+            opened_idx = idx
+            break
+        candidate.release()
+
+    if cap is None:
+        tried = ", ".join(str(i) for i in camera_candidates)
+        print(f"Could not open camera device. Tried indexes: {tried}", file=sys.stderr)
         return 3
 
-    timeout_sec = 12.0
+    timeout_sec = 8.0
     deadline = time.time() + timeout_sec
     matched_frames = 0
-    required_matches = 4
+    required_matches = 2
     best_score = -1.0
 
     try:
@@ -117,7 +139,7 @@ def main() -> int:
             if score >= threshold:
                 matched_frames += 1
                 if matched_frames >= required_matches:
-                    print("Owner face recognized")
+                    print(f"Owner face recognized (camera {opened_idx})")
                     return 0
             else:
                 # Decay quickly so non-owner or unstable frames cannot pass.

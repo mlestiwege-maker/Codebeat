@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -53,17 +54,41 @@ def main() -> int:
         print("Could not load OpenCV face cascade.", file=sys.stderr)
         return 2
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Could not open camera device 0.", file=sys.stderr)
+    requested_idx = os.environ.get("CODEBEAT_CAMERA_INDEX", "").strip()
+    camera_candidates: list[int] = []
+    if requested_idx:
+        try:
+            camera_candidates.append(int(requested_idx))
+        except ValueError:
+            pass
+    for idx in (0, 1, 2):
+        if idx not in camera_candidates:
+            camera_candidates.append(idx)
+
+    cap = None
+    opened_idx = None
+    for idx in camera_candidates:
+        candidate = cv2.VideoCapture(idx)
+        if candidate.isOpened():
+            cap = candidate
+            opened_idx = idx
+            break
+        candidate.release()
+
+    if cap is None:
+        tried = ", ".join(str(i) for i in camera_candidates)
+        print(f"Could not open camera device. Tried indexes: {tried}", file=sys.stderr)
         return 3
 
-    target_samples = 24
-    timeout_sec = 25.0
+    target_samples = 16
+    timeout_sec = 18.0
     deadline = time.time() + timeout_sec
     descriptors: list[np.ndarray] = []
 
-    print("Face enrollment started. Keep only your face in frame and look straight at the camera.")
+    print(
+        f"Face enrollment started on camera {opened_idx}. "
+        "Keep only your face in frame and look straight at the camera."
+    )
 
     try:
         while time.time() < deadline and len(descriptors) < target_samples:
@@ -86,7 +111,7 @@ def main() -> int:
             if len(descriptors) % 4 == 0:
                 print(f"Captured {len(descriptors)}/{target_samples} samples...")
 
-        if len(descriptors) < 12:
+        if len(descriptors) < 8:
             print(
                 f"Enrollment failed: only captured {len(descriptors)} good samples. Improve lighting and retry.",
                 file=sys.stderr,

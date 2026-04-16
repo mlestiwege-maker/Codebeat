@@ -18,6 +18,13 @@ trap cleanup EXIT
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env"
+  set +a
+fi
+
 pick_python() {
   local candidates=(
     "$ROOT_DIR/.venv/bin/python"
@@ -35,7 +42,7 @@ pick_python() {
 
 PYTHON_BIN="$(pick_python || true)"
 
-RECORD_SECS="${CODEBEAT_VOICE_SECONDS:-4}"
+RECORD_SECS="${CODEBEAT_VOICE_SECONDS:-10}"
 PULSE_SOURCE="${CODEBEAT_PULSE_SOURCE:-default}"
 WHISPER_MODEL="${CODEBEAT_WHISPER_MODEL:-tiny.en}"
 
@@ -79,14 +86,28 @@ record_audio() {
   if command -v parec >/dev/null 2>&1; then
     local bytes
     bytes=$((RECORD_SECS * 16000 * 2))
+
     if timeout "$((RECORD_SECS + 2))" parec --device "$PULSE_SOURCE" --format=s16le --rate=16000 --channels=1 --latency-msec=50 > "$TMP_RAW" 2>/dev/null; then
       if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
         return 0
       fi
     fi
 
+    # Retry without explicit --device in case the configured source alias is invalid.
+    if timeout "$((RECORD_SECS + 2))" parec --format=s16le --rate=16000 --channels=1 --latency-msec=50 > "$TMP_RAW" 2>/dev/null; then
+      if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
+        return 0
+      fi
+    fi
+
     # fallback that force-stops parec after needed bytes
-    if timeout "$((RECORD_SECS + 2))" bash -lc "parec --device '$PULSE_SOURCE' --format=s16le --rate=16000 --channels=1 --latency-msec=50 | head -c $bytes" > "$TMP_RAW" 2>/dev/null; then
+    if timeout "$((RECORD_SECS + 2))" sh -c "parec --device '$PULSE_SOURCE' --format=s16le --rate=16000 --channels=1 --latency-msec=50 | head -c $bytes" > "$TMP_RAW" 2>/dev/null; then
+      if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
+        return 0
+      fi
+    fi
+
+    if timeout "$((RECORD_SECS + 2))" sh -c "parec --format=s16le --rate=16000 --channels=1 --latency-msec=50 | head -c $bytes" > "$TMP_RAW" 2>/dev/null; then
       if [[ -s "$TMP_RAW" ]] && raw_to_wav "$TMP_RAW" "$TMP_WAV" && [[ -s "$TMP_WAV" ]]; then
         return 0
       fi
@@ -124,12 +145,17 @@ if [[ -n "${PYTHON_BIN:-}" ]]; then
     if "$PYTHON_BIN" - "$TMP_WAV" <<'PY'
 import sys
 import wave
+import traceback
+import warnings
 from pathlib import Path
 
 import numpy as np
 import os
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 import whisper
+
+warnings.filterwarnings("ignore", message=".*CUDA initialization.*")
+warnings.filterwarnings("ignore", message=".*FP16 is not supported on CPU.*")
 
 wav_path = Path(sys.argv[1])
 if not wav_path.exists() or wav_path.stat().st_size == 0:
@@ -160,20 +186,62 @@ if framerate != target_rate and audio.size > 0:
 audio = np.clip(audio, -1.0, 1.0)
 
 model_name = os.environ.get("CODEBEAT_WHISPER_MODEL", "tiny.en")
-model = whisper.load_model(model_name)
-result = model.transcribe(audio, language="en", verbose=False)
-text = (result.get("text") or "").strip()
-if text:
-  print(text)
-  raise SystemExit(0)
-raise SystemExit(4)
+
+def _decode(model, arr, *, force_english):
+  kwargs = {
+      "verbose": False,
+      "condition_on_previous_text": False,
+      "fp16": False,
+      "temperature": 0,
+      "no_speech_threshold": 0.25,
+      "compression_ratio_threshold": 2.8,
+      "logprob_threshold": -1.2,
+  }
+  if force_english:
+    kwargs["language"] = "en"
+
+  result = model.transcribe(arr, **kwargs)
+  return (result.get("text") or "").strip()
+
+rms = float(np.sqrt(np.mean(np.square(audio)))) if audio.size else 0.0
+
+try:
+  model = whisper.load_model(model_name)
+
+  text = _decode(model, audio, force_english=True)
+
+  # Second pass: normalize/boost low-volume captures and allow auto language.
+  if not text:
+    work = np.copy(audio)
+    if rms > 0:
+      target_rms = 0.08
+      gain = min(12.0, max(1.0, target_rms / max(rms, 1e-6)))
+      work = np.clip(work * gain, -1.0, 1.0)
+    text = _decode(model, work, force_english=False)
+
+  if text:
+    print(text)
+    raise SystemExit(0)
+  peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+  print(f"No speech text detected in audio (rms={rms:.4f}, peak={peak:.4f}).", file=sys.stderr)
+  raise SystemExit(4)
+except SystemExit:
+  raise
+except Exception as e:
+  print(f"Python whisper error: {e}", file=sys.stderr)
+  traceback.print_exc(file=sys.stderr)
+  raise SystemExit(6)
 PY
     then
       exit 0
+    else
+      code=$?
     fi
-    code=$?
+
     if [[ $code -eq 4 ]]; then
       echo "Python whisper transcription produced no text." >&2
+    elif [[ $code -eq 6 ]]; then
+      echo "Python whisper runtime error (see details above)." >&2
     else
       echo "Python whisper transcription failed." >&2
     fi

@@ -17,6 +17,10 @@
 #include <chrono>
 #include <vector>
 
+bool SplashScreen::faceOnlyMode() const {
+    return qEnvironmentVariableIntValue("CODEBEAT_FACE_ONLY") != 0;
+}
+
 SplashScreen::SplashScreen(QWidget* parent) : QWidget(parent) {
     setWindowFlags(Qt::SplashScreen | Qt::FramelessWindowHint);
     setFixedSize(900, 500);
@@ -45,11 +49,21 @@ void SplashScreen::prepareForAuth() {
     if (feedback_label_ != nullptr) {
         feedback_label_->clear();
     }
+
+    if (face_only_mode_) {
+        QTimer::singleShot(350, this, [this]() { onBiometricAuthenticate(); });
+    }
 }
 
 void SplashScreen::setupAuthUi() {
+    face_only_mode_ = faceOnlyMode();
+
     const auto os_user = qEnvironmentVariable("USER", "operator");
-    prompt_label_ = new QLabel("Welcome " + os_user + " • Authenticate with passkey or biometrics", this);
+    prompt_label_ = new QLabel(
+        face_only_mode_
+            ? ("Welcome " + os_user + " • Face unlock only")
+            : ("Welcome " + os_user + " • Authenticate with passkey or biometrics"),
+        this);
     prompt_label_->setAlignment(Qt::AlignCenter);
     prompt_label_->setStyleSheet(
         "QLabel {"
@@ -81,8 +95,12 @@ void SplashScreen::setupAuthUi() {
         "}"
     );
 
+    if (face_only_mode_) {
+        auth_input_->hide();
+    }
+
     unlock_button_ = new QPushButton("Unlock", this);
-    unlock_button_->setGeometry(565, 350, 90, 40);
+    unlock_button_->setGeometry(540, 350, 85, 40);
     unlock_button_->setStyleSheet(
         "QPushButton {"
         "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7b35ff, stop:1 #00b8e6);"
@@ -101,8 +119,12 @@ void SplashScreen::setupAuthUi() {
         "}"
     );
 
+    if (face_only_mode_) {
+        unlock_button_->hide();
+    }
+
     face_auth_button_ = new QPushButton("Face Auth", this);
-    face_auth_button_->setGeometry(660, 350, 100, 40);
+    face_auth_button_->setGeometry(630, 350, 100, 40);
     face_auth_button_->setStyleSheet(
         "QPushButton {"
         "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #16a085, stop:1 #1abc9c);"
@@ -121,8 +143,14 @@ void SplashScreen::setupAuthUi() {
         "}"
     );
 
+    if (face_only_mode_) {
+        face_auth_button_->setText("Face Unlock");
+        face_auth_button_->setGeometry(585, 350, 140, 40);
+    }
+
     feedback_label_ = new QLabel(this);
     feedback_label_->setAlignment(Qt::AlignCenter);
+    feedback_label_->setWordWrap(true);
     feedback_label_->setStyleSheet(
         "QLabel {"
         " color: #ff86b6;"
@@ -131,12 +159,41 @@ void SplashScreen::setupAuthUi() {
         " background: transparent;"
         "}"
     );
-    feedback_label_->setGeometry(220, 396, 460, 22);
+    feedback_label_->setGeometry(180, 396, 540, 46);
+
+    enroll_face_button_ = new QPushButton("Enroll Face", this);
+    enroll_face_button_->setGeometry(735, 350, 110, 40);
+    enroll_face_button_->setStyleSheet(
+        "QPushButton {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #845EC2, stop:1 #6F42C1);"
+        "  color: #ffffff;"
+        "  border: none;"
+        "  border-radius: 8px;"
+        "  font-family: 'Segoe UI', 'Calibri';"
+        "  font-size: 12px;"
+        "  font-weight: 700;"
+        "}"
+        "QPushButton:hover {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #9569cf, stop:1 #7f57cf);"
+        "}"
+        "QPushButton:pressed {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7049ab, stop:1 #5f37a8);"
+        "}"
+    );
 
     connect(unlock_button_, &QPushButton::clicked, this, [this]() { onAuthenticate(); });
     connect(face_auth_button_, &QPushButton::clicked, this, [this]() { onBiometricAuthenticate(); });
+    connect(enroll_face_button_, &QPushButton::clicked, this, [this]() { onEnrollFace(); });
     connect(auth_input_, &QLineEdit::returnPressed, this, [this]() { onAuthenticate(); });
     auth_input_->setFocus();
+
+    if (face_only_mode_) {
+        feedback_label_->setStyleSheet(
+            "QLabel { color: #8befff; font-family: 'Segoe UI', 'Calibri'; font-size: 11px; background: transparent; }"
+        );
+        feedback_label_->setText("Face-only mode enabled. Scanning your face now...");
+        QTimer::singleShot(450, this, [this]() { onBiometricAuthenticate(); });
+    }
 }
 
 bool SplashScreen::isValidAccessKey(const QString& text) const {
@@ -150,6 +207,14 @@ bool SplashScreen::isValidAccessKey(const QString& text) const {
 }
 
 void SplashScreen::onAuthenticate() {
+    if (face_only_mode_) {
+        feedback_label_->setStyleSheet(
+            "QLabel { color: #ffcc66; font-family: 'Segoe UI', 'Calibri'; font-size: 11px; background: transparent; }"
+        );
+        feedback_label_->setText("Face-only mode is enabled. Use Face Unlock or Enroll Face.");
+        return;
+    }
+
     const auto entered = auth_input_->text();
     if (isValidAccessKey(entered)) {
         updateStatus("Access granted • entering system...");
@@ -195,14 +260,57 @@ void SplashScreen::onBiometricAuthenticate() {
     }
 
     const auto err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
-    const auto shortErr = err.isEmpty() ? QString("Face authentication unavailable/failed") : err.left(95);
+    QString shortErr = err.isEmpty() ? QString("Face authentication unavailable/failed") : err;
+    if (shortErr.contains("No enrolled owner face profile found", Qt::CaseInsensitive)) {
+        shortErr = "No face profile yet. Run ./face_auth.sh --enroll, then try Face Auth again.";
+    } else {
+        const auto lines = shortErr.split('\n', Qt::SkipEmptyParts);
+        if (!lines.isEmpty()) {
+            shortErr = lines.back().trimmed();
+        }
+    }
 
     updateStatus("Biometric check unavailable or failed");
     feedback_label_->setStyleSheet(
         "QLabel { color: #ffcc66; font-family: 'Segoe UI', 'Calibri'; font-size: 11px; background: transparent; }"
     );
-    feedback_label_->setText(shortErr + " • use passkey unlock");
+    feedback_label_->setText(shortErr + (face_only_mode_ ? " • re-enroll or fix camera" : " • use passkey unlock"));
     auth_input_->setFocus();
+}
+
+void SplashScreen::onEnrollFace() {
+    updateStatus("Face enrollment started... look at camera");
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir d(appDir);
+    d.cdUp();
+    const QString scriptPath = d.absoluteFilePath("face_auth.sh");
+
+    QProcess proc;
+    proc.start("bash", {"-lc", "\"" + scriptPath + "\" --enroll"});
+    const bool done = proc.waitForFinished(45000);
+
+    if (done && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
+        updateStatus("Face enrollment complete. You can now use Face Auth.");
+        feedback_label_->setStyleSheet(
+            "QLabel { color: #7bffba; font-family: 'Segoe UI', 'Calibri'; font-size: 11px; background: transparent; }"
+        );
+        feedback_label_->setText("Enrollment complete. Click Face Auth to unlock.");
+        return;
+    }
+
+    const auto err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+    QString shortErr = err.isEmpty() ? QString("Face enrollment failed") : err;
+    const auto lines = shortErr.split('\n', Qt::SkipEmptyParts);
+    if (!lines.isEmpty()) {
+        shortErr = lines.back().trimmed();
+    }
+
+    updateStatus("Face enrollment unavailable or failed");
+    feedback_label_->setStyleSheet(
+        "QLabel { color: #ffcc66; font-family: 'Segoe UI', 'Calibri'; font-size: 11px; background: transparent; }"
+    );
+    feedback_label_->setText(shortErr + " • you can still use passkey unlock");
 }
 
 void SplashScreen::updateStatus(const QString& status) {

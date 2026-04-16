@@ -5,6 +5,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY_FACE_SCRIPT="$ROOT_DIR/runtime/face_auth.py"
 PY_ENROLL_SCRIPT="$ROOT_DIR/runtime/face_enroll.py"
 
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env"
+  set +a
+fi
+
 pick_python() {
   local candidates=(
     "$ROOT_DIR/.venv/bin/python"
@@ -39,9 +46,10 @@ if [[ "${1:-}" == "--enroll" ]]; then
 fi
 
 if command -v howdy >/dev/null 2>&1; then
-  howdy test >/dev/null 2>&1 && exit 0
-  echo "Howdy is installed but biometric verification failed." >&2
-  exit 10
+  if howdy test >/dev/null 2>&1; then
+    exit 0
+  fi
+  echo "Howdy verification failed, trying OpenCV fallback..." >&2
 fi
 
 if [[ ! -f "$PY_FACE_SCRIPT" ]]; then

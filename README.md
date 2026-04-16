@@ -21,6 +21,8 @@ From-scratch C++ AI assistant project (tiny-first curriculum), with a Qt desktop
 - Optional biometric button uses Linux face-auth in this order:
 	1) `howdy test` (if installed)
 	2) OpenCV owner-face verification fallback (`./face_auth.sh` -> `runtime/face_auth.py`)
+- Splash screen also includes **Enroll Face** button (runs `./face_auth.sh --enroll`) so you can set owner profile without terminal.
+- If `CODEBEAT_FACE_ONLY=1`, the splash auto-scans your face on startup and hides passkey unlock controls.
 - In main app, click **LOCK** (or type `lock`) to return to splash access screen.
 - Black premium UI theme with neon accents.
 
@@ -47,14 +49,18 @@ Voice control:
 	1) recorder: `arecord` -> `pw-record` -> `parec` -> `ffmpeg`
 	2) transcriber: `whisper` CLI (or Python `openai-whisper` fallback)
 - Voice capture script: `./voice_recognize.sh` (records 4s and transcribes).
+- Voice decode now retries with normalized/boosted audio for low-volume microphone input.
 - If voice fails, Codebeat now shows backend-specific error text in chat.
 - Run `voice status` in chat to see detected recorder/ASR backends and active candidates.
 
 Optional voice tuning env vars:
 
-- `CODEBEAT_VOICE_SECONDS` (default: `4`)
+- `CODEBEAT_VOICE_SECONDS` (default: `10`)
 - `CODEBEAT_PULSE_SOURCE` (default: `default`) to pick a specific Pulse/PipeWire input source
 - `CODEBEAT_WHISPER_MODEL` (default: `tiny.en`) to choose whisper model (`tiny.en`, `base.en`, etc.)
+- `CODEBEAT_CAMERA_INDEX` (default: `0`) to choose webcam index for face enroll/verify
+
+These values can be set in `.env` at project root (auto-loaded by `voice_recognize.sh` and `face_auth.sh`).
 
 ## Optional dependencies for local voice + face fallback
 
@@ -75,6 +81,21 @@ Before OpenCV fallback biometric unlock can verify identity, enroll your face on
 - This saves an owner profile at `data/processed/face_profile.npz`.
 - Biometric fallback unlock now checks **match against your enrolled profile**, not just "any detected face".
 - If no profile exists, face auth will instruct you to enroll first.
+- If Howdy is installed but fails, Codebeat now automatically falls back to OpenCV verification.
+
+## Troubleshooting voice/face quickly
+
+- Voice says transcription failed:
+	- Run `voice status` in chat and ensure at least one recorder + one ASR backend is available.
+	- Try a different mic source in `.env` (for PipeWire/Pulse systems this is often the fix):
+		- `CODEBEAT_PULSE_SOURCE=default` (or your explicit source name)
+	- Keep a clear 4-6s command and avoid starting with silence.
+- Face says profile missing:
+	- Run `./face_auth.sh --enroll` once to create `data/processed/face_profile.npz`.
+- Face cannot open camera:
+	- Set `CODEBEAT_CAMERA_INDEX` in `.env` to `0`, `1`, or `2` based on your webcam.
+- Face unlock feels slow:
+	- Keep `CODEBEAT_FACE_ONLY=1` enabled so the app auto-starts face scanning.
 
 ## How to run Codebeat
 

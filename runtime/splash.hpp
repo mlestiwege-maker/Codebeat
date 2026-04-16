@@ -27,14 +27,18 @@ private:
     void setupAuthUi();
     [[nodiscard]] bool isValidAccessKey(const QString& text) const;
     void onAuthenticate();
+    void onEnrollFace();
     void onBiometricAuthenticate();
     void updateStatus(const QString& status);
+    bool faceOnlyMode() const;
     QString status_text_{"Initializing Codebeat...   "};
     int animation_frame_{0};
+    bool face_only_mode_{false};
     QLabel* prompt_label_{nullptr};
     QLineEdit* auth_input_{nullptr};
     QPushButton* unlock_button_{nullptr};
     QPushButton* face_auth_button_{nullptr};
+    QPushButton* enroll_face_button_{nullptr};
     QLabel* feedback_label_{nullptr};
 };
 #else
