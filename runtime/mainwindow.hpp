@@ -7,6 +7,7 @@
 #include <QStringList>
 
 #include "runtime/memory.hpp"
+#include "runtime/planner.hpp"
 #include "runtime/tools.hpp"
 
 #include <vector>
@@ -54,9 +55,11 @@ private:
     std::vector<QString> notes_{};
     std::vector<QString> knowledge_corpus_{};
     bool knowledge_loaded_{false};
+    bool concise_mode_{false};
     QString last_user_message_{};
     int interaction_count_{0};
     codebeat::runtime::ConversationMemory memory_{};
+    codebeat::runtime::Planner planner_{};
     codebeat::runtime::Tools tools_{};
 };
 #else

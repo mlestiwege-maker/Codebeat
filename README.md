@@ -45,6 +45,12 @@ Inside Codebeat chat, you can now run:
 - `what can you control`
 - `learn: <fact>`
 - `knowledge status`
+- `plan <goal>`
+- `brainstorm <topic>` / `ideas <topic>`
+- `compare <option A> vs <option B>`
+- `rewrite: <style>::<text>`
+- `summarize: <text>`
+- `mode concise` / `mode detailed` / `mode status`
 
 Voice control:
 

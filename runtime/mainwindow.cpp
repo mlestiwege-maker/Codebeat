@@ -21,6 +21,7 @@
 #include <QProcess>
 
 #include <algorithm>
+#include <set>
 
 bool MainWindow::launchAny(const QStringList& executables, const QStringList& args) {
     for (const auto& exe : executables) {
@@ -566,6 +567,18 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     ensureKnowledgeLoaded();
     const auto lowered = text.trimmed().toLower();
 
+    if (lowered == "mode concise") {
+        concise_mode_ = true;
+        return "Response mode set to concise.";
+    }
+    if (lowered == "mode detailed") {
+        concise_mode_ = false;
+        return "Response mode set to detailed.";
+    }
+    if (lowered == "mode status") {
+        return QString("Current response mode: %1").arg(concise_mode_ ? "concise" : "detailed");
+    }
+
     if (lowered.startsWith("learn:") || lowered.startsWith("learn ")) {
         const auto fact = lowered.startsWith("learn:")
                               ? text.mid(text.indexOf(':') + 1)
@@ -582,6 +595,139 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     const auto taskReply = tryHandleSystemTask(text, handled);
     if (handled) {
         return taskReply;
+    }
+
+    if (lowered.startsWith("plan ") && lowered.size() > 5) {
+        const auto goal = text.mid(5).trimmed();
+        if (goal.isEmpty()) {
+            return "Usage: plan <goal>. Example: plan build and test codebeat and push changes.";
+        }
+
+        QStringList chunks = goal.split(QRegularExpression("\\b(and then|then|and|->|,)\\b"), Qt::SkipEmptyParts);
+        for (auto& c : chunks) {
+            c = c.trimmed();
+        }
+        chunks.erase(std::remove_if(chunks.begin(), chunks.end(), [](const QString& s) { return s.isEmpty(); }), chunks.end());
+
+        QString out = "Plan for: " + goal + "\n";
+        int step = 1;
+        if (chunks.size() >= 2) {
+            for (const auto& c : chunks) {
+                out += QString::number(step++) + ". " + c + "\n";
+            }
+            out += QString::number(step++) + ". validate results\n";
+            out += QString::number(step) + ". iterate on weak spots";
+        } else {
+            out += "1. understand requirements\n";
+            out += "2. design small implementation steps\n";
+            out += "3. implement incrementally\n";
+            out += "4. test and validate\n";
+            out += "5. refine and ship";
+        }
+
+        const auto plannerHint = QString::fromStdString(planner_.plan(goal.toStdString()));
+        out += "\n\nPlanner hint: " + plannerHint;
+        return out;
+    }
+
+    if (lowered.startsWith("brainstorm ") || lowered.startsWith("ideas ")) {
+        const auto topic = lowered.startsWith("brainstorm ") ? text.mid(11).trimmed() : text.mid(6).trimmed();
+        if (topic.isEmpty()) {
+            return "Usage: brainstorm <topic> or ideas <topic>.";
+        }
+        return "Ideas for " + topic + ":\n"
+               "• Build a minimal MVP with one killer workflow.\n"
+               "• Add a fast feedback loop with clear diagnostics.\n"
+               "• Introduce automation for repetitive tasks.\n"
+               "• Add a premium UX layer for key actions.\n"
+               "• Measure outcomes and iterate weekly.";
+    }
+
+    if (lowered.startsWith("compare ") && lowered.size() > 8) {
+        const auto body = text.mid(8).trimmed();
+        int vsIdx = body.toLower().indexOf(" vs ");
+        if (vsIdx < 0) {
+            return "Usage: compare <option A> vs <option B>.";
+        }
+        const auto left = body.left(vsIdx).trimmed();
+        const auto right = body.mid(vsIdx + 4).trimmed();
+        if (left.isEmpty() || right.isEmpty()) {
+            return "Usage: compare <option A> vs <option B>.";
+        }
+        return "Comparison: " + left + " vs " + right + "\n"
+               "• Strengths: " + left + " may optimize simplicity; " + right + " may optimize flexibility.\n"
+               "• Risks: " + left + " can limit edge-cases; " + right + " can increase complexity.\n"
+               "• Cost: evaluate implementation time, maintenance, and reliability.\n"
+               "• Recommendation: pick the option that matches your immediate priority and test it with a small pilot.";
+    }
+
+    if (lowered.startsWith("rewrite:") || lowered.startsWith("rewrite ")) {
+        const auto payload = lowered.startsWith("rewrite:") ? text.mid(8).trimmed() : text.mid(8).trimmed();
+        int sep = payload.indexOf("::");
+        if (sep < 0) {
+            return "Usage: rewrite: <style>::<text>. Styles: concise, professional, friendly, technical.";
+        }
+        const auto style = payload.left(sep).trimmed().toLower();
+        QString source = payload.mid(sep + 2).trimmed();
+        source.replace(QRegularExpression("\\s+"), " ");
+        if (source.isEmpty()) {
+            return "Please provide text to rewrite.";
+        }
+
+        if (style == "concise") {
+            if (source.size() > 160) {
+                source = source.left(157).trimmed() + "...";
+            }
+            return "Concise rewrite: " + source;
+        }
+        if (style == "professional") {
+            return "Professional rewrite: " + source.left(1).toUpper() + source.mid(1);
+        }
+        if (style == "friendly") {
+            return "Friendly rewrite: Hey! " + source;
+        }
+        if (style == "technical") {
+            return "Technical rewrite: " + source + " (validated through incremental testing and observable outputs).";
+        }
+        return "Unknown style. Use: concise, professional, friendly, or technical.";
+    }
+
+    if (lowered.startsWith("summarize:") || lowered.startsWith("summarize ")) {
+        QString payload = lowered.startsWith("summarize:") ? text.mid(10).trimmed() : text.mid(10).trimmed();
+        if (payload.isEmpty()) {
+            payload = last_user_message_.trimmed();
+        }
+        if (payload.isEmpty()) {
+            return "I don’t have text to summarize yet. Use: summarize: <text>.";
+        }
+
+        const auto sentences = payload.split(QRegularExpression("(?<=[.!?])\\s+"), Qt::SkipEmptyParts);
+        QString core;
+        if (!sentences.isEmpty()) {
+            core = sentences.first().trimmed();
+            if (sentences.size() > 1) {
+                core += " " + sentences.at(1).trimmed();
+            }
+        } else {
+            core = payload;
+        }
+        if (core.size() > 220) {
+            core = core.left(217).trimmed() + "...";
+        }
+
+        std::set<QString> uniq;
+        QStringList keywords;
+        for (const auto& k : splitKeywords(payload)) {
+            if (uniq.insert(k).second) {
+                keywords.push_back(k);
+            }
+            if (keywords.size() >= 6) {
+                break;
+            }
+        }
+
+        QString keyLine = keywords.isEmpty() ? "none" : keywords.join(", ");
+        return "Summary: " + core + "\nKey terms: " + keyLine;
     }
 
     if (lowered == "lock" || lowered == "lock app" || lowered == "relock") {
@@ -619,7 +765,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try: open chrome, open vs code, open terminal, search linux c++, run ls, close chrome, voice status, learn: Codebeat should be concise, knowledge status, remember ..., status, time.";
+        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try: open chrome, open vs code, open terminal, search linux c++, run ls, close chrome, voice status, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
     }
 
     if (lowered.contains("status")) {
@@ -670,6 +816,10 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     const auto grounded = retrieveKnowledgeReply(text);
     if (!grounded.isEmpty()) {
         return grounded;
+    }
+
+    if (concise_mode_) {
+        return "Understood: " + text;
     }
 
     return "Understood. My take: " + text + "\nIf you want, I can break that into concrete next steps.";
