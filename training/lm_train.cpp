@@ -6,10 +6,49 @@
 
 #include <iostream>
 #include <sstream>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
-int main() {
+int main(int argc, char** argv) {
     using namespace codebeat;
+
+    int epochs = 6;
+    float learning_rate = 0.01f;
+    std::string corpus_path = "data/raw/corpus.txt";
+
+    if (const char* env_epochs = std::getenv("CODEBEAT_TRAIN_EPOCHS"); env_epochs && *env_epochs) {
+        try {
+            epochs = std::max(1, std::stoi(env_epochs));
+        } catch (...) {
+            // Keep default if parsing fails.
+        }
+    }
+    if (const char* env_lr = std::getenv("CODEBEAT_TRAIN_LR"); env_lr && *env_lr) {
+        try {
+            learning_rate = std::max(1e-5f, std::stof(env_lr));
+        } catch (...) {
+            // Keep default if parsing fails.
+        }
+    }
+    if (const char* env_corpus = std::getenv("CODEBEAT_TRAIN_CORPUS"); env_corpus && *env_corpus) {
+        corpus_path = env_corpus;
+    }
+
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if ((arg == "--epochs" || arg == "-e") && i + 1 < argc) {
+            epochs = std::max(1, std::stoi(argv[++i]));
+        } else if ((arg == "--lr" || arg == "-l") && i + 1 < argc) {
+            learning_rate = std::max(1e-5f, std::stof(argv[++i]));
+        } else if ((arg == "--corpus" || arg == "-c") && i + 1 < argc) {
+            corpus_path = argv[++i];
+        } else if (arg == "--help" || arg == "-h") {
+            std::cout << "Usage: codebeat_train [--epochs N] [--lr RATE] [--corpus PATH]\n";
+            std::cout << "Env overrides: CODEBEAT_TRAIN_EPOCHS, CODEBEAT_TRAIN_LR, CODEBEAT_TRAIN_CORPUS\n";
+            return 0;
+        }
+    }
 
     // Numeric smoke test for foundational engine ops.
     engine::Tensor a({2, 3}, 0.0f);
@@ -29,19 +68,22 @@ int main() {
               << " ce_loss=" << loss << "\n";
 
     models::TinyDecoderTransformer model(models::TransformerConfig{});
-    training::LineDataset dataset("data/raw/corpus.txt");
+    training::LineDataset dataset(corpus_path);
 
     if (!dataset.open()) {
-        std::cerr << "Could not open data/raw/corpus.txt. Create it with one sample per line.\n";
+        std::cerr << "Could not open corpus file: " << corpus_path << "\n";
         return 1;
     }
 
+    std::cout << "[train] config epochs=" << epochs
+              << " lr=" << learning_rate
+              << " corpus=" << corpus_path << "\n";
+
     training::LMTrainer trainer(model, dataset);
     std::vector<training::LMTrainer::EpochStats> stats;
-    constexpr int kEpochs = 3;
-    for (int epoch = 0; epoch < kEpochs; ++epoch) {
-        std::cout << "[train] starting epoch " << (epoch + 1) << "/" << kEpochs << "\n";
-        stats.push_back(trainer.run_epoch(0.01f, true));
+    for (int epoch = 0; epoch < epochs; ++epoch) {
+        std::cout << "[train] starting epoch " << (epoch + 1) << "/" << epochs << "\n";
+        stats.push_back(trainer.run_epoch(learning_rate, true));
 
         std::ostringstream ckpt_prefix;
         ckpt_prefix << "data/processed/codebeat_epoch_" << (epoch + 1);
