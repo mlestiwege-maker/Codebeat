@@ -152,7 +152,11 @@ Tool-use commands like `run` and `execute` are protected by a **confirmation gat
 Voice control:
 
 - Click `🎙 VOICE` in the main app and speak a command.
-- Codebeat writes down the transcript it heard, runs the command, and speaks concise replies aloud when `spd-say` is available.
+- Codebeat writes down the transcript it heard, runs the command, and speaks replies aloud using a TTS backend chain:
+	1) `piper` (best quality, if configured with a model)
+	2) `spd-say`
+	3) `espeak-ng`
+	4) `espeak`
 - Voice mode badge now reflects live state: `READY`, `STANDBY`, `LISTENING`, and `SPEAKING`.
 - Auto-refresh badge now shows live state: `OFF` or `ON (<interval>s)`.
 - A compact **Heard queue** strip shows the last 3 normalized transcripts for quick verification before/after execution.
@@ -168,6 +172,7 @@ Voice control:
 - Voice decode now retries with normalized/boosted audio for low-volume microphone input.
 - If voice fails, Codebeat now shows backend-specific error text in chat.
 - Run `voice status` in chat to see detected recorder/ASR backends and active candidates.
+- `voice status` now also shows detected TTS backends + current TTS config.
 - Run `voice audit status` to check voice audit log health and last recorded entry.
 - Run `voice audit summary` to see a compact report with counts, last role/score, and paths.
 - Run `voice audit open` to open the audit log file in your system viewer/editor.
@@ -210,8 +215,16 @@ Optional voice tuning env vars:
 - `CODEBEAT_VOICE_DEBUG` (default: `0`) set to `1` to print selected mic source and extra voice diagnostics to stderr
 - `CODEBEAT_VOICE_SAVE_LAST` (default: `1`) save the latest capture to `data/processed/last_voice.wav` for voice identity checks
 - `CODEBEAT_VOICE_OUTPUT` (default: `1`) speak assistant replies aloud with `spd-say` when available; set to `0` for silent mode
+- `CODEBEAT_TTS_ENGINE` (default: `auto`) choose TTS backend order target: `auto`, `piper`, `spd-say`, `espeak-ng`, `espeak`
+- `CODEBEAT_TTS_VOICE` (default: `en-us`) voice id for `spd-say` / `espeak(-ng)`
+- `CODEBEAT_TTS_RATE` (default: `165`) speech rate (range `80-260`)
+- `CODEBEAT_TTS_PITCH` (default: `45`) speech pitch (range `0-99`, espeak backends)
+- `CODEBEAT_TTS_PIPER_MODEL` (optional) path to local Piper `.onnx` model for natural human-like voice
+- `CODEBEAT_TTS_PIPER_SPEAKER` (default: `0`) Piper speaker id (`-1` uses model default)
 - `CODEBEAT_CAMERA_INDEX` (default: `0`) to choose webcam index for face enroll/verify
 - `CODEBEAT_FACE_THRESHOLD` (optional, default profile value `0.88`) to tune owner-match strictness
+
+For the most natural voice quality, install Piper and set `CODEBEAT_TTS_PIPER_MODEL` to a valid voice model path.
 
 Local AI / Ollama env vars:
 

@@ -135,6 +135,12 @@ private:
     bool voice_identity_refresh_in_progress_{false};
     bool voice_identity_refresh_pending_{false};
     bool voice_output_enabled_{true};
+    QString tts_engine_{"auto"};
+    QString tts_voice_{"en-us"};
+    QString tts_piper_model_path_{};
+    int tts_rate_{170};
+    int tts_pitch_{50};
+    int tts_piper_speaker_{0};
     bool voice_speaking_in_progress_{false};
     bool auto_refresh_enabled_{false};
     int auto_refresh_interval_ms_{4000};

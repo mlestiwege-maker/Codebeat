@@ -652,6 +652,10 @@ QString MainWindow::voiceDiagnostics() const {
     const bool hasParec = hasCommand("parec");
     const bool hasFfmpeg = hasCommand("ffmpeg");
     const bool hasWhisperCli = hasCommand("whisper");
+    const bool hasSpdSay = hasCommand("spd-say");
+    const bool hasEspeakNg = hasCommand("espeak-ng");
+    const bool hasEspeak = hasCommand("espeak");
+    const bool hasPiper = hasCommand("piper");
 
     const QString appDir = QCoreApplication::applicationDirPath();
     QDir d(appDir);
@@ -701,6 +705,16 @@ QString MainWindow::voiceDiagnostics() const {
               ", python_whisper=" + QString(hasPythonWhisper ? "yes" : "no");
     report += "\n• Active recorder candidate: " + activeRecorder;
     report += "\n• Active ASR candidate: " + activeAsr;
+    report += "\n• TTS backends: piper=" + QString(hasPiper ? "yes" : "no") +
+              ", spd-say=" + QString(hasSpdSay ? "yes" : "no") +
+              ", espeak-ng=" + QString(hasEspeakNg ? "yes" : "no") +
+              ", espeak=" + QString(hasEspeak ? "yes" : "no");
+    report += "\n• TTS config: engine=" + tts_engine_ +
+              ", voice=" + tts_voice_ +
+              ", rate=" + QString::number(tts_rate_);
+    if (!tts_piper_model_path_.isEmpty()) {
+        report += "\n• Piper model: " + tts_piper_model_path_;
+    }
 
     if (!pythonBin.isEmpty()) {
         report += "\n• Python path: " + pythonBin;
@@ -812,7 +826,83 @@ void MainWindow::speakText(const QString& text) {
                          speechProc->deleteLater();
                      });
 
-    speechProc->start("spd-say", {"--rate=170", speakable});
+    const QString ttsScript =
+        "text=\"$1\"; "
+        "rate=\"$2\"; "
+        "voice=\"$3\"; "
+        "engine=\"$4\"; "
+        "pitch=\"$5\"; "
+        "piper_model=\"$6\"; "
+        "piper_speaker=\"$7\"; "
+        ""
+        "has() { command -v \"$1\" >/dev/null 2>&1; }; "
+        ""
+        "try_piper() { "
+        "  [[ -n \"$piper_model\" ]] || return 1; "
+        "  [[ -f \"$piper_model\" ]] || return 1; "
+        "  has piper || return 1; "
+        "  local tmp_wav; "
+        "  tmp_wav=$(mktemp /tmp/codebeat_tts_XXXXXX.wav) || return 1; "
+        "  local speaker_args=(); "
+        "  if [[ -n \"$piper_speaker\" && \"$piper_speaker\" != \"-1\" ]]; then "
+        "    speaker_args=(--speaker \"$piper_speaker\"); "
+        "  fi; "
+        "  if ! printf '%s' \"$text\" | piper --model \"$piper_model\" \"${speaker_args[@]}\" --output_file \"$tmp_wav\" >/dev/null 2>&1; then "
+        "    rm -f \"$tmp_wav\"; return 1; "
+        "  fi; "
+        "  if has paplay; then paplay \"$tmp_wav\" >/dev/null 2>&1; "
+        "  elif has pw-play; then pw-play \"$tmp_wav\" >/dev/null 2>&1; "
+        "  elif has aplay; then aplay -q \"$tmp_wav\" >/dev/null 2>&1; "
+        "  elif has ffplay; then ffplay -nodisp -autoexit -loglevel error \"$tmp_wav\" >/dev/null 2>&1; "
+        "  else rm -f \"$tmp_wav\"; return 1; fi; "
+        "  local rc=$?; rm -f \"$tmp_wav\"; return $rc; "
+        "}; "
+        ""
+        "try_spdsay() { "
+        "  has spd-say || return 1; "
+        "  if [[ -n \"$voice\" ]]; then "
+        "    exec spd-say \"--rate=$rate\" \"--voice=$voice\" \"$text\"; "
+        "  fi; "
+        "  exec spd-say \"--rate=$rate\" \"$text\"; "
+        "}; "
+        ""
+        "try_espeak_ng() { "
+        "  has espeak-ng || return 1; "
+        "  if [[ -n \"$voice\" ]]; then exec espeak-ng -s \"$rate\" -p \"$pitch\" -v \"$voice\" \"$text\"; fi; "
+        "  exec espeak-ng -s \"$rate\" -p \"$pitch\" \"$text\"; "
+        "}; "
+        ""
+        "try_espeak() { "
+        "  has espeak || return 1; "
+        "  if [[ -n \"$voice\" ]]; then exec espeak -s \"$rate\" -p \"$pitch\" -v \"$voice\" \"$text\"; fi; "
+        "  exec espeak -s \"$rate\" -p \"$pitch\" \"$text\"; "
+        "}; "
+        ""
+        "case \"$engine\" in "
+        "  piper) try_piper || exit 1 ;; "
+        "  spd-say) try_spdsay || exit 1 ;; "
+        "  espeak-ng) try_espeak_ng || exit 1 ;; "
+        "  espeak) try_espeak || exit 1 ;; "
+        "  auto|*) "
+        "    try_piper && exit 0; "
+        "    try_spdsay || true; "
+        "    try_espeak_ng || true; "
+        "    try_espeak || true; "
+        "    exit 1 ;; "
+        "esac";
+
+    speechProc->start("bash", {
+        "-lc",
+        ttsScript,
+        "_",
+        speakable,
+        QString::number(std::clamp(tts_rate_, 80, 260)),
+        tts_voice_,
+        tts_engine_,
+        QString::number(std::clamp(tts_pitch_, 0, 99)),
+        tts_piper_model_path_,
+        QString::number(tts_piper_speaker_)
+    });
     if (!speechProc->waitForStarted(800)) {
         if (speechProc == activeSpeechProcess_) {
             activeSpeechProcess_ = nullptr;
@@ -2004,6 +2094,39 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     bool voiceOutputOk = false;
     const auto voiceOutputRaw = qEnvironmentVariableIntValue("CODEBEAT_VOICE_OUTPUT", &voiceOutputOk);
     voice_output_enabled_ = !voiceOutputOk || voiceOutputRaw != 0;
+
+    const auto ttsEngine = qEnvironmentVariable("CODEBEAT_TTS_ENGINE").trimmed().toLower();
+    if (!ttsEngine.isEmpty()) {
+        tts_engine_ = ttsEngine;
+    }
+
+    const auto ttsVoice = qEnvironmentVariable("CODEBEAT_TTS_VOICE").trimmed();
+    if (!ttsVoice.isEmpty()) {
+        tts_voice_ = ttsVoice;
+    }
+
+    const auto ttsPiperModel = qEnvironmentVariable("CODEBEAT_TTS_PIPER_MODEL").trimmed();
+    if (!ttsPiperModel.isEmpty()) {
+        tts_piper_model_path_ = ttsPiperModel;
+    }
+
+    bool ttsRateOk = false;
+    const auto ttsRateRaw = qEnvironmentVariableIntValue("CODEBEAT_TTS_RATE", &ttsRateOk);
+    if (ttsRateOk) {
+        tts_rate_ = std::clamp(ttsRateRaw, 80, 260);
+    }
+
+    bool ttsPitchOk = false;
+    const auto ttsPitchRaw = qEnvironmentVariableIntValue("CODEBEAT_TTS_PITCH", &ttsPitchOk);
+    if (ttsPitchOk) {
+        tts_pitch_ = std::clamp(ttsPitchRaw, 0, 99);
+    }
+
+    bool ttsSpeakerOk = false;
+    const auto ttsSpeakerRaw = qEnvironmentVariableIntValue("CODEBEAT_TTS_PIPER_SPEAKER", &ttsSpeakerOk);
+    if (ttsSpeakerOk) {
+        tts_piper_speaker_ = std::clamp(ttsSpeakerRaw, -1, 999);
+    }
 
     auto_refresh_timer_ = new QTimer(this);
     auto_refresh_timer_->setInterval(auto_refresh_interval_ms_);
