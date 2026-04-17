@@ -1528,6 +1528,22 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
         return "Voice style applied: " + normalizedStyle + "\n" + currentTtsStyleSummary();
     }
 
+    if (lowered == "voice sample" || lowered == "voice test" || lowered == "test voice" ||
+        lowered == "speak sample" || lowered.startsWith("voice sample ")) {
+        handled = true;
+
+        QString sample = "Hi — I’m Codebeat. This is a voice sample so you can check the current style, cadence, and clarity.";
+        if (lowered.startsWith("voice sample ") && text.size() > 13) {
+            const auto custom = text.mid(13).trimmed();
+            if (!custom.isEmpty()) {
+                sample = custom;
+            }
+        }
+
+        speakText(sample);
+        return QString("Speaking sample with style %1.").arg(tts_style_);
+    }
+
     if (lowered == "ollama status" || lowered == "local ai status" || lowered == "local model status") {
         handled = true;
         return ollamaStatus();
@@ -1931,7 +1947,7 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
 
     if (lowered == "what can you control" || lowered == "apps") {
         handled = true;
-        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open downloads, search <query>, google <query>, open docs for <topic>, close browser, close <app>, run <command>, code status, code diff summary, code recent commits, open project file <path>, create feature branch <name>, plugin status, plugin reload, voice status, voice role, voice style status, voice style calm, voice audit status, voice standby on, refresh auto status, volume up, volume down, mute, unmute, battery status, show running processes, take screenshot.";
+        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open downloads, search <query>, google <query>, open docs for <topic>, close browser, close <app>, run <command>, code status, code diff summary, code recent commits, open project file <path>, create feature branch <name>, plugin status, plugin reload, voice status, voice role, voice style status, voice style calm, voice sample, voice audit status, voice standby on, refresh auto status, volume up, volume down, mute, unmute, battery status, show running processes, take screenshot.";
     }
 
     const auto pluginReply = tryHandlePluginCommand(text, handled);

@@ -69,6 +69,7 @@ Inside Codebeat chat, you can now run:
 - `voice status`
 - `voice style status`
 - `voice style <default|calm|warm|clear|broadcast>`
+- `voice sample` / `voice test` / `test voice`
 - `voice audit status`
 - `voice audit summary`
 - `voice audit open`
@@ -113,6 +114,7 @@ Inside Codebeat chat, you can now run:
 	- `show voice status` → checks the current voice mode and capture state
 	- `voice style warm` → applies a warmer, more natural speaking preset
 	- `voice style status` → shows active style and TTS pacing values
+	- `voice sample` → speaks a built-in sample in the current voice style
 	- `turn auto refresh on` → enables automatic UI refreshes
 	- `open my downloads folder` → opens `~/Downloads`
 	- `make standby more sensitive` → shortens the wake-command window
@@ -233,6 +235,8 @@ Optional voice tuning env vars:
 - `CODEBEAT_FACE_THRESHOLD` (optional, default profile value `0.88`) to tune owner-match strictness
 
 For the most natural voice quality, install Piper and set `CODEBEAT_TTS_PIPER_MODEL` to a valid voice model path.
+
+To audition the current voice settings quickly, run `voice sample` in chat.
 
 Local AI / Ollama env vars:
 
