@@ -90,6 +90,7 @@ Inside Codebeat chat, you can now run:
 - `take screenshot`
 - `refresh app` / `refresh ui`
 - `refresh auto on` / `refresh auto off` / `refresh auto status`
+- `plugin status` / `plugin reload`
 - `what can you control`
 - `learn: <fact>`
 - `knowledge status`
@@ -116,6 +117,8 @@ Inside Codebeat chat, you can now run:
 	- `close browser` → closes Chrome/Chromium if running
 	- `ollama status` → shows whether local Ollama support is enabled
 	- `local ai explain recursion` → asks the local Ollama model a question
+	- `plugin status` → shows plugin file path + loaded plugin count
+	- `plugin reload` → reloads command plugins from disk
 	- `volume up` / `volume down` / `mute` / `unmute` → controls audio
 	- `take screenshot` → captures the screen
 
@@ -205,6 +208,34 @@ Local AI / Ollama env vars:
 - `CODEBEAT_OLLAMA_ENABLED` (default: `0`) enable local Ollama-backed replies
 - `CODEBEAT_OLLAMA_BASE_URL` (default: `http://localhost:11434`) Ollama API base URL
 - `CODEBEAT_OLLAMA_MODEL` (default: `llama3.2`) model to use for local replies
+
+## Plugin system (JSON command plugins)
+
+Codebeat can load custom command plugins from:
+
+- `data/raw/plugins/commands.json`
+
+Built-in plugin controls:
+
+- `plugin status` → shows where plugins are loaded from and how many are active
+- `plugin reload` → reloads plugin definitions without restarting the app
+
+Supported plugin actions:
+
+- `reply` → return static text to chat
+- `open_url` → open a URL via `xdg-open`
+- `run` → run a shell command (requires `allow_run=true`; still subject to safety confirmations)
+
+Example plugin entry:
+
+```json
+{
+	"trigger": "plugin hello",
+	"action": "reply",
+	"value": "Hello from plugin",
+	"enabled": true
+}
+```
 
 These values can be set in `.env` at project root (auto-loaded by `voice_recognize.sh` and `face_auth.sh`).
 

@@ -3,6 +3,7 @@
 #if defined(CODEBEAT_HAS_QT) && __has_include(<QMainWindow>)
 #include <QMainWindow>
 #include <QProcess>
+#include <QJsonArray>
 #include <QString>
 #include <QStringList>
 
@@ -42,8 +43,11 @@ private:
     void setStandbyListening(bool enabled);
     void submitVoiceCommand(const QString& command, const QString& rawHeard, bool announceHeard);
     void ensureKnowledgeLoaded();
+    void ensurePluginCommandsLoaded();
     QString retrieveKnowledgeReply(const QString& query) const;
     QString learnKnowledgeFact(const QString& rawFact);
+    QString pluginStatus() const;
+    QString tryHandlePluginCommand(const QString& text, bool& handled);
     static QString normalizeKnowledgeFact(const QString& text);
     static QStringList splitKeywords(const QString& text);
     void runQuickAction(const QString& text);
@@ -91,6 +95,9 @@ private:
     std::vector<QString> notes_{};
     std::vector<QString> knowledge_corpus_{};
     bool knowledge_loaded_{false};
+    bool plugins_loaded_{false};
+    QString plugin_commands_path_{};
+    QJsonArray plugin_commands_{};
     bool concise_mode_{false};
     QString last_user_message_{};
     int interaction_count_{0};

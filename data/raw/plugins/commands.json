@@ -1,0 +1,26 @@
+{
+  "commands": [
+    {
+      "trigger": "plugin hello",
+      "action": "reply",
+      "value": "Hello from the Codebeat plugin system.",
+      "enabled": true,
+      "description": "Basic plugin health check"
+    },
+    {
+      "trigger": "open codebeat repo",
+      "action": "open_url",
+      "value": "https://github.com/mlestiwege-maker/Codebeat",
+      "enabled": true,
+      "description": "Open project repository in browser"
+    },
+    {
+      "trigger": "plugin date",
+      "action": "run",
+      "value": "date",
+      "allow_run": false,
+      "enabled": true,
+      "description": "Example shell plugin (requires allow_run=true)"
+    }
+  ]
+}

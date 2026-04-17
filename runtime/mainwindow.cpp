@@ -144,6 +144,140 @@ void MainWindow::ensureKnowledgeLoaded() {
     }
 }
 
+void MainWindow::ensurePluginCommandsLoaded() {
+    if (plugins_loaded_) {
+        return;
+    }
+    plugins_loaded_ = true;
+    plugin_commands_ = QJsonArray{};
+
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir d(appDir);
+    d.cdUp();
+    plugin_commands_path_ = d.absoluteFilePath("data/raw/plugins/commands.json");
+
+    QFile f(plugin_commands_path_);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return;
+    }
+
+    const auto raw = f.readAll();
+    QJsonParseError err{};
+    const auto doc = QJsonDocument::fromJson(raw, &err);
+    if (err.error != QJsonParseError::NoError) {
+        return;
+    }
+
+    if (doc.isArray()) {
+        plugin_commands_ = doc.array();
+        return;
+    }
+
+    if (doc.isObject()) {
+        const auto root = doc.object();
+        if (root.contains("commands") && root.value("commands").isArray()) {
+            plugin_commands_ = root.value("commands").toArray();
+        }
+    }
+}
+
+QString MainWindow::pluginStatus() const {
+    if (plugin_commands_path_.isEmpty()) {
+        return "Plugin system is ready. Run `plugin reload` to load commands from data/raw/plugins/commands.json.";
+    }
+
+    QFileInfo fi(plugin_commands_path_);
+    const QString exists = fi.exists() ? "yes" : "no";
+    return QString("Plugins loaded: %1\nPlugin file: %2\nFile exists: %3")
+        .arg(plugin_commands_.size())
+        .arg(plugin_commands_path_)
+        .arg(exists);
+}
+
+QString MainWindow::tryHandlePluginCommand(const QString& text, bool& handled) {
+    handled = false;
+    ensurePluginCommandsLoaded();
+
+    const auto lowered = text.trimmed().toLower();
+
+    if (lowered == "plugin status" || lowered == "plugins status") {
+        handled = true;
+        return pluginStatus();
+    }
+
+    if (lowered == "plugin reload" || lowered == "plugins reload") {
+        handled = true;
+        plugins_loaded_ = false;
+        plugin_commands_ = QJsonArray{};
+        ensurePluginCommandsLoaded();
+        return "Plugin definitions reloaded. " + pluginStatus();
+    }
+
+    for (const auto& entry : plugin_commands_) {
+        if (!entry.isObject()) {
+            continue;
+        }
+
+        const auto obj = entry.toObject();
+        const bool enabled = !obj.contains("enabled") || obj.value("enabled").toBool(true);
+        if (!enabled) {
+            continue;
+        }
+
+        const auto trigger = obj.value("trigger").toString().trimmed().toLower();
+        if (trigger.isEmpty() || trigger != lowered) {
+            continue;
+        }
+
+        const auto action = obj.value("action").toString("reply").trimmed().toLower();
+        const auto value = obj.value("value").toString().trimmed();
+        handled = true;
+
+        if (action == "reply") {
+            return value.isEmpty() ? "Plugin matched, but no reply text is configured." : value;
+        }
+
+        if (action == "open_url") {
+            if (value.isEmpty()) {
+                return "Plugin matched, but no URL is configured.";
+            }
+            const bool ok = QProcess::startDetached("xdg-open", {value});
+            return ok ? ("Opening plugin URL: " + value) : "Plugin URL action failed to start.";
+        }
+
+        if (action == "run") {
+            const bool allowRun = obj.value("allow_run").toBool(false);
+            if (!allowRun) {
+                return "Plugin run action is disabled. Set allow_run=true for this command.";
+            }
+            if (value.isEmpty()) {
+                return "Plugin matched, but no shell command is configured.";
+            }
+
+            bool needsConfirm = false;
+            if (!isCommandAllowed("run " + value, needsConfirm)) {
+                return "Plugin run command blocked by safety policy.";
+            }
+
+            if (needsConfirm && pending_confirmation_cmd_.isEmpty()) {
+                pending_confirmation_cmd_ = value;
+                return "Execute: " + value + "?\n\nReply 'yes' to confirm or 'no' to cancel.";
+            }
+
+            if (needsConfirm && pending_confirmation_cmd_ == value) {
+                pending_confirmation_cmd_.clear();
+            }
+
+            const bool ok = QProcess::startDetached("bash", {"-lc", value});
+            return ok ? ("Running plugin command: " + value) : "Plugin run action failed to start.";
+        }
+
+        return "Plugin action is unknown. Supported actions: reply, open_url, run.";
+    }
+
+    return {};
+}
+
 QString MainWindow::retrieveKnowledgeReply(const QString& query) const {
     if (knowledge_corpus_.empty()) {
         return {};
@@ -1423,7 +1557,12 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
 
     if (lowered == "what can you control" || lowered == "apps") {
         handled = true;
-        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open downloads, search <query>, google <query>, open docs for <topic>, close browser, close <app>, run <command>, voice status, voice role, voice audit status, voice standby on, refresh auto status, volume up, volume down, mute, unmute, battery status, show running processes, take screenshot.";
+        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open downloads, search <query>, google <query>, open docs for <topic>, close browser, close <app>, run <command>, plugin status, plugin reload, voice status, voice role, voice audit status, voice standby on, refresh auto status, volume up, volume down, mute, unmute, battery status, show running processes, take screenshot.";
+    }
+
+    const auto pluginReply = tryHandlePluginCommand(text, handled);
+    if (handled) {
+        return pluginReply;
     }
 
     return {};
@@ -1654,7 +1793,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try saying: I want to write some code, open the browser, open my downloads folder, google qt signals slots, open docs for cmake, close browser, create folder project-notes, show running processes, battery status, voice status, voice role, ollama status, local ai explain recursion, refresh auto status, volume up, volume down, mute, unmute, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
+        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try saying: I want to write some code, open the browser, open my downloads folder, google qt signals slots, open docs for cmake, close browser, create folder project-notes, show running processes, battery status, voice status, voice role, ollama status, local ai explain recursion, plugin status, plugin reload, refresh auto status, volume up, volume down, mute, unmute, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
     }
 
     if (lowered.contains("status")) {
