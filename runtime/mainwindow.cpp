@@ -39,6 +39,63 @@ bool MainWindow::launchAny(const QStringList& executables, const QStringList& ar
     return false;
 }
 
+bool MainWindow::applyTtsStyle(const QString& styleName, QString* normalizedStyle) {
+    const auto s = styleName.trimmed().toLower();
+    if (s.isEmpty()) {
+        return false;
+    }
+
+    if (s == "default" || s == "standard" || s == "assistant") {
+        tts_rate_ = 165;
+        tts_pitch_ = 45;
+        tts_chunk_chars_ = 150;
+        tts_pause_ms_ = 90;
+        tts_style_ = "default";
+    } else if (s == "calm" || s == "soft") {
+        tts_rate_ = 150;
+        tts_pitch_ = 42;
+        tts_chunk_chars_ = 135;
+        tts_pause_ms_ = 120;
+        tts_style_ = "calm";
+    } else if (s == "warm" || s == "friendly") {
+        tts_rate_ = 160;
+        tts_pitch_ = 48;
+        tts_chunk_chars_ = 145;
+        tts_pause_ms_ = 100;
+        tts_style_ = "warm";
+    } else if (s == "clear" || s == "precise") {
+        tts_rate_ = 176;
+        tts_pitch_ = 50;
+        tts_chunk_chars_ = 165;
+        tts_pause_ms_ = 70;
+        tts_style_ = "clear";
+    } else if (s == "broadcast" || s == "presenter") {
+        tts_rate_ = 188;
+        tts_pitch_ = 54;
+        tts_chunk_chars_ = 175;
+        tts_pause_ms_ = 55;
+        tts_style_ = "broadcast";
+    } else {
+        return false;
+    }
+
+    if (normalizedStyle != nullptr) {
+        *normalizedStyle = tts_style_;
+    }
+    return true;
+}
+
+QString MainWindow::currentTtsStyleSummary() const {
+    return QString("Voice style: %1\nTTS: engine=%2, voice=%3, rate=%4, pitch=%5, chunk=%6, pause=%7ms")
+        .arg(tts_style_)
+        .arg(tts_engine_)
+        .arg(tts_voice_)
+        .arg(tts_rate_)
+        .arg(tts_pitch_)
+        .arg(tts_chunk_chars_)
+        .arg(tts_pause_ms_);
+}
+
 QString MainWindow::normalizeKnowledgeFact(const QString& text) {
     QString out = text;
     out.replace(QRegularExpression("[\r\n]+"), " ");
@@ -473,6 +530,32 @@ QString MainWindow::inferIntentCommand(const QString& text) const {
         return "voice role";
     }
 
+    if (has("voice") && has("style") && has("status")) {
+        return "voice style status";
+    }
+
+    {
+        QRegularExpression voiceStyleSetRx(R"(^(?:please\s+)?(?:set|change|use|switch(?:\s+to)?)\s+(?:the\s+)?voice\s+style\s+(?:to\s+)?(\w+)$)");
+        const auto m = voiceStyleSetRx.match(normalized);
+        if (m.hasMatch()) {
+            const auto style = m.captured(1).trimmed();
+            if (!style.isEmpty()) {
+                return "voice style " + style;
+            }
+        }
+    }
+
+    {
+        QRegularExpression voiceStyleShortRx(R"(^(?:please\s+)?voice\s+style\s+(\w+)$)");
+        const auto m = voiceStyleShortRx.match(normalized);
+        if (m.hasMatch()) {
+            const auto style = m.captured(1).trimmed();
+            if (!style.isEmpty()) {
+                return "voice style " + style;
+            }
+        }
+    }
+
     if ((has("battery") && (has("status") || has("health") || has("check"))) || has("power status")) {
         return "battery status";
     }
@@ -715,6 +798,7 @@ QString MainWindow::voiceDiagnostics() const {
     report += ", max_chars=" + QString::number(tts_max_chars_) +
               ", chunk_chars=" + QString::number(tts_chunk_chars_) +
               ", pause_ms=" + QString::number(tts_pause_ms_);
+    report += ", style=" + tts_style_;
     if (!tts_piper_model_path_.isEmpty()) {
         report += "\n• Piper model: " + tts_piper_model_path_;
     }
@@ -1429,6 +1513,21 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
             .arg(QString::number(last_voice_score_, 'f', 3));
     }
 
+    if (lowered == "voice style status" || lowered == "tts style status") {
+        handled = true;
+        return currentTtsStyleSummary();
+    }
+
+    if (lowered.startsWith("voice style ") && lowered.size() > 12) {
+        handled = true;
+        const auto style = text.mid(12).trimmed().toLower();
+        QString normalizedStyle;
+        if (!applyTtsStyle(style, &normalizedStyle)) {
+            return "Unknown voice style. Available: default, calm, warm, clear, broadcast.";
+        }
+        return "Voice style applied: " + normalizedStyle + "\n" + currentTtsStyleSummary();
+    }
+
     if (lowered == "ollama status" || lowered == "local ai status" || lowered == "local model status") {
         handled = true;
         return ollamaStatus();
@@ -1832,7 +1931,7 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
 
     if (lowered == "what can you control" || lowered == "apps") {
         handled = true;
-        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open downloads, search <query>, google <query>, open docs for <topic>, close browser, close <app>, run <command>, code status, code diff summary, code recent commits, open project file <path>, create feature branch <name>, plugin status, plugin reload, voice status, voice role, voice audit status, voice standby on, refresh auto status, volume up, volume down, mute, unmute, battery status, show running processes, take screenshot.";
+        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open downloads, search <query>, google <query>, open docs for <topic>, close browser, close <app>, run <command>, code status, code diff summary, code recent commits, open project file <path>, create feature branch <name>, plugin status, plugin reload, voice status, voice role, voice style status, voice style calm, voice audit status, voice standby on, refresh auto status, volume up, volume down, mute, unmute, battery status, show running processes, take screenshot.";
     }
 
     const auto pluginReply = tryHandlePluginCommand(text, handled);
@@ -2068,7 +2167,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try saying: I want to write some code, open the browser, open my downloads folder, google qt signals slots, open docs for cmake, close browser, create folder project-notes, code status, code diff summary, code recent commits, open project file README.md, create feature branch feature/voice-coding, show running processes, battery status, voice status, voice role, ollama status, local ai explain recursion, plugin status, plugin reload, refresh auto status, volume up, volume down, mute, unmute, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
+        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try saying: I want to write some code, open the browser, open my downloads folder, google qt signals slots, open docs for cmake, close browser, create folder project-notes, code status, code diff summary, code recent commits, open project file README.md, create feature branch feature/voice-coding, show running processes, battery status, voice status, voice role, voice style status, voice style warm, ollama status, local ai explain recursion, plugin status, plugin reload, refresh auto status, volume up, volume down, mute, unmute, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
     }
 
     if (lowered.contains("status")) {
@@ -2168,6 +2267,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     const auto ttsPiperModel = qEnvironmentVariable("CODEBEAT_TTS_PIPER_MODEL").trimmed();
     if (!ttsPiperModel.isEmpty()) {
         tts_piper_model_path_ = ttsPiperModel;
+    }
+
+    const auto ttsStyle = qEnvironmentVariable("CODEBEAT_TTS_STYLE").trimmed();
+    if (!ttsStyle.isEmpty()) {
+        applyTtsStyle(ttsStyle);
     }
 
     bool ttsRateOk = false;

@@ -67,6 +67,8 @@ Inside Codebeat chat, you can now run:
 - `auth face`
 - `auth passkey <your-passkey>`
 - `voice status`
+- `voice style status`
+- `voice style <default|calm|warm|clear|broadcast>`
 - `voice audit status`
 - `voice audit summary`
 - `voice audit open`
@@ -109,6 +111,8 @@ Inside Codebeat chat, you can now run:
 	- `I want to write some code` → opens VS Code
 	- `please create a folder called project-notes` → creates a local folder in your home directory
 	- `show voice status` → checks the current voice mode and capture state
+	- `voice style warm` → applies a warmer, more natural speaking preset
+	- `voice style status` → shows active style and TTS pacing values
 	- `turn auto refresh on` → enables automatic UI refreshes
 	- `open my downloads folder` → opens `~/Downloads`
 	- `make standby more sensitive` → shortens the wake-command window
@@ -216,6 +220,7 @@ Optional voice tuning env vars:
 - `CODEBEAT_VOICE_SAVE_LAST` (default: `1`) save the latest capture to `data/processed/last_voice.wav` for voice identity checks
 - `CODEBEAT_VOICE_OUTPUT` (default: `1`) speak assistant replies aloud with `spd-say` when available; set to `0` for silent mode
 - `CODEBEAT_TTS_ENGINE` (default: `auto`) choose TTS backend order target: `auto`, `piper`, `spd-say`, `espeak-ng`, `espeak`
+- `CODEBEAT_TTS_STYLE` (default: `warm`) voice preset: `default`, `calm`, `warm`, `clear`, `broadcast`
 - `CODEBEAT_TTS_VOICE` (default: `en-us`) voice id for `spd-say` / `espeak(-ng)`
 - `CODEBEAT_TTS_RATE` (default: `165`) speech rate (range `80-260`)
 - `CODEBEAT_TTS_PITCH` (default: `45`) speech pitch (range `0-99`, espeak backends)

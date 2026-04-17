@@ -35,6 +35,8 @@ private slots:
 
 private:
     QString inferIntentCommand(const QString& text) const;
+    bool applyTtsStyle(const QString& styleName, QString* normalizedStyle = nullptr);
+    QString currentTtsStyleSummary() const;
     bool isWakePhrase(const QString& text) const;
     QString stripWakePrefix(const QString& text) const;
     static bool isInterruptCommand(const QString& text);
@@ -144,6 +146,7 @@ private:
     int tts_max_chars_{280};
     int tts_chunk_chars_{150};
     int tts_pause_ms_{90};
+    QString tts_style_{"custom"};
     bool voice_speaking_in_progress_{false};
     bool auto_refresh_enabled_{false};
     int auto_refresh_interval_ms_{4000};
