@@ -18,7 +18,10 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QTextStream>
+#include <QDateTime>
+#include <QStandardPaths>
 #include <QProcess>
+#include <QStyle>
 
 #include <algorithm>
 #include <set>
@@ -175,7 +178,7 @@ QString MainWindow::retrieveKnowledgeReply(const QString& query) const {
     return "From my local knowledge: " + bestLine;
 }
 
-QString MainWindow::normalizeVoiceTranscript(const QString& text) {
+QString MainWindow::normalizeVoiceTranscript(const QString& text) const {
     QString t = text.trimmed();
     if (t.isEmpty()) {
         return t;
@@ -256,6 +259,155 @@ QString MainWindow::normalizeVoiceTranscript(const QString& text) {
     if (t.startsWith("voice status")) return "voice status";
 
     return t.trimmed();
+}
+
+QString MainWindow::inferIntentCommand(const QString& text) const {
+    QString normalized = text.trimmed().toLower();
+    if (normalized.isEmpty()) {
+        return {};
+    }
+
+    normalized.replace(QRegularExpression(R"([\p{Punct}]+)"), " ");
+    normalized.replace(QRegularExpression(R"(\s+)"), " ");
+    normalized = normalized.trimmed();
+
+    const auto has = [&normalized](const QString& needle) { return normalized.contains(needle); };
+    const bool openAction = has("open") || has("launch") || has("start");
+
+    if (has("write code") || has("open vscode") || has("open vs code") ||
+        (has("write") && has("code")) || (has("code") && has("editor")) ||
+        (has("i want") && has("code"))) {
+        return "open vs code";
+    }
+
+    if ((has("browser") && openAction) || has("open chrome") ||
+        has("browse the web") || has("search the web") || has("internet browser")) {
+        return "open chrome";
+    }
+
+    {
+        QRegularExpression docsRx(R"(^(?:please\s+)?(?:open|show|find|search)\s+(?:the\s+)?(?:docs|documentation)\s+(?:for\s+)?(.+)$)");
+        const auto m = docsRx.match(normalized);
+        if (m.hasMatch()) {
+            const auto topic = m.captured(1).trimmed();
+            if (!topic.isEmpty()) {
+                return "search " + topic + " documentation";
+            }
+        }
+    }
+
+    {
+        QRegularExpression searchRx(R"(^(?:please\s+)?(?:search|google|look up|lookup|find)\s+(?:for\s+)?(.+)$)");
+        const auto m = searchRx.match(normalized);
+        if (m.hasMatch()) {
+            const auto query = m.captured(1).trimmed();
+            if (!query.isEmpty()) {
+                return "search " + query;
+            }
+        }
+    }
+
+    if ((has("downloads") || has("download folder") || has("downloads folder")) &&
+        (has("open") || has("show") || has("launch") || has("browse"))) {
+        return "open downloads";
+    }
+
+    if ((has("editor") || has("code editor") || has("text editor")) && openAction) {
+        return "open vs code";
+    }
+
+    if ((has("terminal") || has("shell") || has("command line") || has("console")) &&
+        (openAction || normalized == "terminal" || normalized == "open terminal")) {
+        return "open terminal";
+    }
+
+    if ((has("close") || has("quit") || has("exit")) &&
+        (has("browser") || has("chrome") || has("chromium"))) {
+        return "close chrome";
+    }
+
+    if (has("voice status") || (has("voice") && has("status")) || (has("microphone") && has("status"))) {
+        return "voice status";
+    }
+
+    if ((has("voice") || has("speaker") || has("speaking")) &&
+        (has("role") || has("identity") || has("who"))) {
+        return "voice role";
+    }
+
+    if ((has("battery") && (has("status") || has("health") || has("check"))) || has("power status")) {
+        return "battery status";
+    }
+
+    if (has("running processes") || (has("show") && has("process")) || has("task list")) {
+        return "show running processes";
+    }
+
+    if (has("screenshot") || has("screen capture") || has("capture the screen")) {
+        return "take screenshot";
+    }
+
+    if (has("refresh") && has("auto") && (has("on") || has("enable"))) {
+        return "refresh auto on";
+    }
+    if (has("refresh") && has("auto") && (has("off") || has("disable"))) {
+        return "refresh auto off";
+    }
+    if ((has("refresh") && has("auto") && has("status")) ||
+        (has("is") && has("auto") && has("refresh") && has("on"))) {
+        return "refresh auto status";
+    }
+    if (has("refresh") && (has("ui") || has("app") || has("screen"))) {
+        return "refresh app";
+    }
+
+    if ((has("volume") && (has("up") || has("increase") || has("louder") || has("raise"))) ||
+        has("turn volume up")) {
+        return "volume up";
+    }
+    if ((has("volume") && (has("down") || has("decrease") || has("quieter") || has("lower"))) ||
+        has("turn volume down")) {
+        return "volume down";
+    }
+    if ((has("volume") && has("mute")) || has("mute audio") || has("mute sound")) {
+        return "mute";
+    }
+    if ((has("volume") && has("unmute")) || has("unmute audio") || has("unmute sound")) {
+        return "unmute";
+    }
+
+    if ((has("create") || has("make") || has("new")) && has("folder")) {
+        QString folderName = normalized;
+        folderName.replace(QRegularExpression(R"(^(please\s+)?(create|make|new)\s+(a\s+)?folder(\s+called|\s+named|\s+for)?\s*)"), "");
+        folderName.replace(QRegularExpression(R"(^(please\s+)?(create|make)\s+(a\s+)?new\s+folder(\s+called|\s+named|\s+for)?\s*)"), "");
+        folderName = folderName.trimmed();
+        if (folderName.isEmpty()) {
+            return "create folder";
+        }
+        return "create folder " + folderName;
+    }
+
+    if (has("standby") && (has("on") || has("enable") || has("start"))) {
+        return "voice standby on";
+    }
+    if (has("standby") && (has("off") || has("disable") || has("stop"))) {
+        return "voice standby off";
+    }
+    if (has("standby") && (has("more sensitive") || has("increase sensitivity") || has("sensitivity up"))) {
+        return "voice standby sensitivity up";
+    }
+    if (has("standby") && (has("less sensitive") || has("decrease sensitivity") || has("sensitivity down"))) {
+        return "voice standby sensitivity down";
+    }
+
+    if (has("voice") && (has("enroll") || has("train")) && has("owner")) {
+        return "voice enroll owner";
+    }
+    if (has("voice") && (has("enroll") || has("train")) && has("trusted")) {
+        return "voice enroll trusted";
+    }
+
+    return {};
 }
 
 QString MainWindow::loadSafetyPolicy() {
@@ -393,6 +545,171 @@ QString MainWindow::voiceDiagnostics() const {
     return report;
 }
 
+void MainWindow::updateVoiceModeBadge() {
+    if (voiceModeBadge_ == nullptr) {
+        return;
+    }
+
+    QString text;
+    QString color;
+    QString border;
+    QString background;
+
+    if (voiceCaptureInProgress_) {
+        text = "🟢 VOICE: LISTENING";
+        color = "#9effc9";
+        border = "#1d8d5e";
+        background = "#10251b";
+    } else if (voice_speaking_in_progress_) {
+        text = "🔵 VOICE: SPEAKING";
+        color = "#8fd8ff";
+        border = "#276f99";
+        background = "#0f2030";
+    } else if (standby_listening_enabled_) {
+        text = "🟡 VOICE: STANDBY";
+        color = "#ffd36e";
+        border = "#8f6a18";
+        background = "#272012";
+    } else {
+        text = "⚪ VOICE: READY";
+        color = "#9bb0bf";
+        border = "#294456";
+        background = "#10161f";
+    }
+
+    voiceModeBadge_->setText(text);
+    voiceModeBadge_->setStyleSheet(
+        "QLabel {"
+        "  background-color: " + background + ";"
+        "  color: " + color + ";"
+        "  border: 1px solid " + border + ";"
+        "  border-radius: 7px;"
+        "  padding: 6px 10px;"
+        "  font-family: 'Monospace';"
+        "  font-size: 10px;"
+        "  font-weight: 700;"
+        "}"
+    );
+}
+
+void MainWindow::speakText(const QString& text) {
+    if (!voice_output_enabled_) {
+        return;
+    }
+
+    QString speakable = text;
+    speakable.replace(QRegularExpression("<[^>]+>"), " ");
+    speakable.replace(QRegularExpression("[\r\n]+"), " ");
+    speakable.replace(QRegularExpression("\\s+"), " ");
+    speakable = speakable.trimmed();
+
+    if (speakable.isEmpty()) {
+        return;
+    }
+
+    if (speakable.size() > 220) {
+        speakable = speakable.left(217).trimmed() + "...";
+    }
+
+    if (activeSpeechProcess_ && activeSpeechProcess_->state() == QProcess::Running) {
+        activeSpeechProcess_->kill();
+    }
+
+    auto* speechProc = new QProcess(this);
+    activeSpeechProcess_ = speechProc;
+    voice_speaking_in_progress_ = true;
+    updateVoiceModeBadge();
+
+    QObject::connect(speechProc, &QProcess::finished, this,
+                     [this, speechProc](int, QProcess::ExitStatus) {
+                         if (speechProc == activeSpeechProcess_) {
+                            activeSpeechProcess_ = nullptr;
+                            voice_speaking_in_progress_ = false;
+                            updateVoiceModeBadge();
+                         }
+                         speechProc->deleteLater();
+                     });
+
+    QObject::connect(speechProc, &QProcess::errorOccurred, this,
+                     [this, speechProc](QProcess::ProcessError) {
+                         if (speechProc == activeSpeechProcess_) {
+                            activeSpeechProcess_ = nullptr;
+                            voice_speaking_in_progress_ = false;
+                            updateVoiceModeBadge();
+                         }
+                         speechProc->deleteLater();
+                     });
+
+    speechProc->start("spd-say", {"--rate=170", speakable});
+    if (!speechProc->waitForStarted(800)) {
+        if (speechProc == activeSpeechProcess_) {
+            activeSpeechProcess_ = nullptr;
+            voice_speaking_in_progress_ = false;
+            updateVoiceModeBadge();
+        }
+        speechProc->deleteLater();
+    }
+}
+
+void MainWindow::updateHeardQueueBadge() {
+    if (heardQueueBadge_ == nullptr) {
+        return;
+    }
+
+    if (heard_queue_.isEmpty()) {
+        heardQueueBadge_->setText("📝 HEARD: (empty)");
+    } else {
+        QStringList recent;
+        const qsizetype start = std::max<qsizetype>(0, heard_queue_.size() - 3);
+        for (qsizetype i = start; i < heard_queue_.size(); ++i) {
+            recent.push_back(heard_queue_.at(i));
+        }
+        heardQueueBadge_->setText("📝 HEARD: " + recent.join(" • "));
+    }
+}
+
+void MainWindow::updateAutoRefreshBadge() {
+    if (autoRefreshBadge_ == nullptr) {
+        return;
+    }
+
+    const QString text = auto_refresh_enabled_
+        ? QString("↻ AUTO REFRESH: ON (%1s)").arg(QString::number(auto_refresh_interval_ms_ / 1000.0, 'f', 1))
+        : "↻ AUTO REFRESH: OFF";
+
+    const QString color = auto_refresh_enabled_ ? "#9effc9" : "#9bb0bf";
+    const QString border = auto_refresh_enabled_ ? "#1d8d5e" : "#294456";
+    const QString background = auto_refresh_enabled_ ? "#10251b" : "#10161f";
+
+    autoRefreshBadge_->setText(text);
+    autoRefreshBadge_->setStyleSheet(
+        "QLabel {"
+        "  background-color: " + background + ";"
+        "  color: " + color + ";"
+        "  border: 1px solid " + border + ";"
+        "  border-radius: 7px;"
+        "  padding: 6px 10px;"
+        "  font-family: 'Monospace';"
+        "  font-size: 9px;"
+        "  font-weight: 700;"
+        "}"
+    );
+}
+
+void MainWindow::refreshUiNow() {
+    updateVoiceModeBadge();
+    updateHeardQueueBadge();
+    updateAutoRefreshBadge();
+    if (input_ != nullptr) {
+        input_->update();
+    }
+    if (chatView_ != nullptr) {
+        chatView_->viewport()->update();
+    }
+    this->update();
+    QCoreApplication::processEvents();
+}
+
 QString MainWindow::captureVoiceCommand() {
     const QString appDir = QCoreApplication::applicationDirPath();
     QDir d(appDir);
@@ -442,6 +759,7 @@ void MainWindow::finalizeVoiceCapture(QProcess* proc, int exitCode, QProcess::Ex
         voiceButton_->setText("🎙 VOICE");
     }
     voiceCaptureInProgress_ = false;
+    updateVoiceModeBadge();
 
     if (exitStatus != QProcess::NormalExit || exitCode != 0) {
         const auto err = QString::fromUtf8(proc->readAllStandardError()).trimmed();
@@ -481,6 +799,14 @@ void MainWindow::finalizeVoiceCapture(QProcess* proc, int exitCode, QProcess::Ex
     } else {
         chatView_->append(QString("<span style='color:#7fffcf;'>Codebeat:</span> Heard: %1").arg(heard));
     }
+    chatView_->append(QString("<span style='color:#89c7ff;'>Codebeat transcript:</span> %1").arg(normalized));
+
+    heard_queue_.push_back(normalized);
+    while (heard_queue_.size() > 3) {
+        heard_queue_.pop_front();
+    }
+    updateHeardQueueBadge();
+
     onSend();
 }
 
@@ -503,6 +829,7 @@ void MainWindow::startVoiceCapture() {
         voiceButton_->setEnabled(false);
         voiceButton_->setText("🎙 ...");
     }
+    updateVoiceModeBadge();
 
     chatView_->append("<span style='color:#7fffcf;'>Codebeat:</span> Listening for voice command...");
 
@@ -541,6 +868,24 @@ void MainWindow::startVoiceCapture() {
 QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
     handled = false;
     const auto lowered = text.trimmed().toLower();
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QDir rootDir(appDir);
+    rootDir.cdUp();
+
+    const auto isLikelyDirectTarget = [](const QString& target) {
+        const auto t = target.trimmed().toLower();
+        if (t.isEmpty() || t.size() > 96) {
+            return false;
+        }
+
+        if (t.contains(" and ") || t.contains(" then ") || t.contains(" because ") ||
+            t.contains(" please ") || t.contains(" maybe ") || t.contains(" i think ")) {
+            return false;
+        }
+
+        static const QRegularExpression targetRx(R"(^[a-z0-9._/+:~\-]+(?:\s+[a-z0-9._/+:~\-]+){0,2}$)");
+        return targetRx.match(t).hasMatch();
+    };
 
     if (lowered == "open chrome" || lowered == "open google chrome") {
         handled = true;
@@ -560,6 +905,19 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
         return ok ? "Opening terminal." : "Could not launch a terminal app.";
     }
 
+    if (lowered == "open downloads" || lowered == "open downloads folder" || lowered == "open my downloads folder") {
+        handled = true;
+        const QString downloadsPath = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+        const bool ok = QProcess::startDetached("xdg-open", {downloadsPath.isEmpty() ? QDir::homePath() : downloadsPath});
+        return ok ? "Opening Downloads folder." : "Could not open Downloads folder.";
+    }
+
+    if (lowered == "close chrome" || lowered == "close browser" || lowered == "quit browser" || lowered == "exit browser") {
+        handled = true;
+        const bool ok = QProcess::startDetached("bash", {"-lc", "pkill -f '(chrome|chromium)'"});
+        return ok ? "Attempting to close browser." : "Could not start close-browser command.";
+    }
+
     if (lowered.startsWith("open ") && lowered.size() > 5) {
         const auto maybeUrl = lowered.mid(5).trimmed();
         if (maybeUrl.startsWith("http://") || maybeUrl.startsWith("https://") || maybeUrl.startsWith("www.")) {
@@ -571,6 +929,9 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
 
         handled = true;
         const auto app = lowered.mid(5).trimmed();
+        if (!isLikelyDirectTarget(app)) {
+            return "That sounds ambiguous. Use a direct target: open firefox, open code, open ~/Downloads, or open https://example.com.";
+        }
         const bool ok = QProcess::startDetached(app, {});
         return ok ? ("Opening " + app + ".") : ("I couldn't open '" + app + "'.");
     }
@@ -587,8 +948,30 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
     if (lowered.startsWith("close ") && lowered.size() > 6) {
         handled = true;
         const auto app = lowered.mid(6).trimmed();
+        if (!isLikelyDirectTarget(app)) {
+            return "That close target looks ambiguous. Try: close chrome, close code, or close <app_name>.";
+        }
         const bool ok = QProcess::startDetached("bash", {"-lc", "pkill -f \"" + app + "\""});
         return ok ? ("Attempting to close: " + app) : "Could not start close command.";
+    }
+
+    if (lowered == "create folder" || lowered == "make folder") {
+        handled = true;
+        return "Usage: create folder <name>. Example: create folder project-notes";
+    }
+
+    if ((lowered.startsWith("create folder ") && lowered.size() > 14) ||
+        (lowered.startsWith("make folder ") && lowered.size() > 12)) {
+        handled = true;
+        const auto folderName = lowered.startsWith("create folder ") ? text.mid(14).trimmed() : text.mid(12).trimmed();
+        if (folderName.isEmpty()) {
+            return "Usage: create folder <name>. Example: create folder project-notes";
+        }
+
+        const QString homeDir = QDir::homePath();
+        const QString targetPath = QDir(homeDir).absoluteFilePath(folderName);
+        const bool ok = QDir().mkpath(targetPath);
+        return ok ? ("Created folder: " + targetPath) : ("Could not create folder: " + targetPath);
     }
 
     if ((lowered.startsWith("run ") && lowered.size() > 4) ||
@@ -619,9 +1002,308 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
         return voiceDiagnostics();
     }
 
+    if (lowered == "voice identity status") {
+        handled = true;
+        return QString("Voice role: %1\nScore: %2")
+            .arg(last_voice_role_)
+            .arg(QString::number(last_voice_score_, 'f', 3));
+    }
+
+    if (lowered == "voice role" || lowered == "voice identity" || lowered == "voice profile status" ||
+        lowered == "who is speaking" || lowered == "who am i by voice") {
+        handled = true;
+        return QString("Voice role: %1\nScore: %2")
+            .arg(last_voice_role_)
+            .arg(QString::number(last_voice_score_, 'f', 3));
+    }
+
+    if (lowered == "voice audit status") {
+        handled = true;
+        const QString logPath = rootDir.absoluteFilePath("data/logs/voice_commands.log");
+        QFileInfo fi(logPath);
+        if (!fi.exists()) {
+            return "Voice audit log not found yet. Trigger at least one voice command first.";
+        }
+        return QString("Voice audit log: %1\nSize: %2 bytes\nLast update: %3")
+            .arg(logPath)
+            .arg(fi.size())
+            .arg(fi.lastModified().toString(Qt::ISODate));
+    }
+
+    if (lowered == "voice audit summary") {
+        handled = true;
+        const QString logPath = rootDir.absoluteFilePath("data/logs/voice_commands.log");
+        QFile f(logPath);
+        if (!f.exists() || !f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            return "Voice audit summary unavailable (no log file yet).";
+        }
+
+        int lines = 0;
+        QString lastLine;
+        QTextStream in(&f);
+        while (!in.atEnd()) {
+            lastLine = in.readLine();
+            ++lines;
+        }
+        return QString("Voice audit entries: %1\nLast entry: %2")
+            .arg(lines)
+            .arg(lastLine.isEmpty() ? QString("(none)") : lastLine.left(220));
+    }
+
+    if (lowered == "open voice log" || lowered == "voice audit open") {
+        handled = true;
+        const QString logPath = rootDir.absoluteFilePath("data/logs/voice_commands.log");
+        const bool ok = QProcess::startDetached("xdg-open", {logPath});
+        return ok ? "Opening voice audit log." : "Couldn't open voice audit log.";
+    }
+
+    if (lowered == "open logs folder" || lowered == "voice audit folder") {
+        handled = true;
+        const QString logsPath = rootDir.absoluteFilePath("data/logs");
+        const bool ok = QProcess::startDetached("xdg-open", {logsPath});
+        return ok ? "Opening logs folder." : "Couldn't open logs folder.";
+    }
+
+    if (lowered == "list exports" || lowered == "voice audit list exports") {
+        handled = true;
+        const QString logsPath = rootDir.absoluteFilePath("data/logs");
+        QDir logs(logsPath);
+        const QStringList files = logs.entryList({"voice_commands_export_*.log"}, QDir::Files, QDir::Time);
+        if (files.isEmpty()) {
+            return "No voice audit exports found yet.";
+        }
+        QString out = "Recent voice exports:";
+        const int cap = std::min(5, static_cast<int>(files.size()));
+        for (int i = 0; i < cap; ++i) {
+            out += "\n• " + files[i];
+        }
+        return out;
+    }
+
+    if (lowered == "open latest export" || lowered == "voice audit open latest") {
+        handled = true;
+        const QString logsPath = rootDir.absoluteFilePath("data/logs");
+        QDir logs(logsPath);
+        const QStringList files = logs.entryList({"voice_commands_export_*.log"}, QDir::Files, QDir::Time);
+        if (files.isEmpty()) {
+            return "No exported voice audit snapshot found yet.";
+        }
+        const QString latest = logs.absoluteFilePath(files.first());
+        const bool ok = QProcess::startDetached("xdg-open", {latest});
+        return ok ? ("Opening latest export: " + latest) : "Couldn't open latest export.";
+    }
+
+    if (lowered == "copy latest export path" || lowered == "voice audit copy latest") {
+        handled = true;
+        const QString logsPath = rootDir.absoluteFilePath("data/logs");
+        QDir logs(logsPath);
+        const QStringList files = logs.entryList({"voice_commands_export_*.log"}, QDir::Files, QDir::Time);
+        if (files.isEmpty()) {
+            return "No exported voice audit snapshot found yet.";
+        }
+        const QString latest = logs.absoluteFilePath(files.first());
+        return "Latest export path: " + latest;
+    }
+
+    if (lowered == "voice audit clear") {
+        handled = true;
+        const QString logPath = rootDir.absoluteFilePath("data/logs/voice_commands.log");
+        QFile f(logPath);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            return "Couldn't clear voice audit log.";
+        }
+        return "Voice audit log cleared.";
+    }
+
+    if (lowered == "voice audit export") {
+        handled = true;
+        const QString logsPath = rootDir.absoluteFilePath("data/logs");
+        QDir().mkpath(logsPath);
+        const QString src = rootDir.absoluteFilePath("data/logs/voice_commands.log");
+        if (!QFileInfo::exists(src)) {
+            return "No voice audit log exists yet to export.";
+        }
+        const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+        const QString dst = QDir(logsPath).absoluteFilePath("voice_commands_export_" + stamp + ".log");
+        QFile::remove(dst);
+        const bool ok = QFile::copy(src, dst);
+        return ok ? ("Voice audit exported: " + dst) : "Voice audit export failed.";
+    }
+
+    if (lowered == "voice standby on" || lowered == "standby on" || lowered == "listening mode on") {
+        handled = true;
+        standby_listening_enabled_ = true;
+        updateVoiceModeBadge();
+        return "Continuous listening is now ON.";
+    }
+
+    if (lowered == "voice standby off" || lowered == "standby off" || lowered == "sleep mode") {
+        handled = true;
+        standby_listening_enabled_ = false;
+        wake_command_until_epoch_secs_ = 0;
+        updateVoiceModeBadge();
+        return "Continuous listening is now OFF.";
+    }
+
+    if (lowered == "stop listening" || lowered == "go to sleep" || lowered == "quiet mode" || lowered == "never mind") {
+        handled = true;
+        if (activeVoiceProcess_ && activeVoiceProcess_->state() == QProcess::Running) {
+            activeVoiceProcess_->terminate();
+            QTimer::singleShot(500, this, [this]() {
+                if (activeVoiceProcess_ && activeVoiceProcess_->state() == QProcess::Running) {
+                    activeVoiceProcess_->kill();
+                }
+            });
+        }
+        voiceCaptureInProgress_ = false;
+        standby_listening_enabled_ = false;
+        updateVoiceModeBadge();
+        return "Voice capture interrupted. Standby mode OFF.";
+    }
+
+    if (lowered == "voice standby status" || lowered == "standby status" || lowered == "listening mode status") {
+        handled = true;
+        const auto standbyState = standby_listening_enabled_ ? "ON" : "OFF";
+        return QString("Standby status: %1\nWake command window: %2s")
+            .arg(standbyState)
+            .arg(wake_command_window_secs_);
+    }
+
+    if (lowered == "voice standby sensitivity up" || lowered == "standby sensitivity up" || lowered == "wake window shorter") {
+        handled = true;
+        wake_command_window_secs_ = std::max(3, wake_command_window_secs_ - 1);
+        return QString("Wake window shortened to %1s.").arg(wake_command_window_secs_);
+    }
+
+    if (lowered == "voice standby sensitivity down" || lowered == "standby sensitivity down" || lowered == "wake window longer") {
+        handled = true;
+        wake_command_window_secs_ = std::min(20, wake_command_window_secs_ + 1);
+        return QString("Wake window extended to %1s.").arg(wake_command_window_secs_);
+    }
+
+    if (lowered == "volume up" || lowered == "sound up") {
+        handled = true;
+        const QString cmd =
+            "(pactl set-sink-volume @DEFAULT_SINK@ +5% "
+            "|| wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+ "
+            "|| amixer -q sset Master 5%+) >/dev/null 2>&1";
+        const bool ok = QProcess::startDetached("bash", {"-lc", cmd});
+        return ok ? "Volume increased." : "Could not increase volume.";
+    }
+
+    if (lowered == "volume down" || lowered == "sound down") {
+        handled = true;
+        const QString cmd =
+            "(pactl set-sink-volume @DEFAULT_SINK@ -5% "
+            "|| wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- "
+            "|| amixer -q sset Master 5%-) >/dev/null 2>&1";
+        const bool ok = QProcess::startDetached("bash", {"-lc", cmd});
+        return ok ? "Volume decreased." : "Could not decrease volume.";
+    }
+
+    if (lowered == "mute" || lowered == "mute volume" || lowered == "mute audio") {
+        handled = true;
+        const QString cmd =
+            "(pactl set-sink-mute @DEFAULT_SINK@ 1 "
+            "|| wpctl set-mute @DEFAULT_AUDIO_SINK@ 1 "
+            "|| amixer -q sset Master mute) >/dev/null 2>&1";
+        const bool ok = QProcess::startDetached("bash", {"-lc", cmd});
+        return ok ? "Audio muted." : "Could not mute audio.";
+    }
+
+    if (lowered == "unmute" || lowered == "unmute volume" || lowered == "unmute audio") {
+        handled = true;
+        const QString cmd =
+            "(pactl set-sink-mute @DEFAULT_SINK@ 0 "
+            "|| wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 "
+            "|| amixer -q sset Master unmute) >/dev/null 2>&1";
+        const bool ok = QProcess::startDetached("bash", {"-lc", cmd});
+        return ok ? "Audio unmuted." : "Could not unmute audio.";
+    }
+
+    if (lowered == "voice enroll owner") {
+        handled = true;
+        const bool ok = QProcess::startDetached("bash", {"-lc", "cd \"" + rootDir.absolutePath() + "\" && python3 runtime/voice_profile.py owner"});
+        return ok ? "Started owner voice enrollment." : "Failed to start owner enrollment.";
+    }
+
+    if (lowered == "voice enroll trusted") {
+        handled = true;
+        const bool ok = QProcess::startDetached("bash", {"-lc", "cd \"" + rootDir.absolutePath() + "\" && python3 runtime/voice_profile.py trusted"});
+        return ok ? "Started trusted voice enrollment." : "Failed to start trusted enrollment.";
+    }
+
+    if (lowered == "check battery" || lowered == "battery status") {
+        handled = true;
+        QProcess proc;
+        proc.start("bash", {"-lc", "upower -i $(upower -e | grep BAT | head -1) 2>/dev/null | grep -E 'state|percentage|time to empty|time to full'"});
+        if (!proc.waitForFinished(5000)) {
+            proc.kill();
+            return "Battery check timed out.";
+        }
+        const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+        return out.isEmpty() ? "Battery details unavailable on this system." : out;
+    }
+
+    if (lowered == "show running processes") {
+        handled = true;
+        QProcess proc;
+        proc.start("bash", {"-lc", "ps aux --sort=-%cpu | head -20"});
+        if (!proc.waitForFinished(5000)) {
+            proc.kill();
+            return "Process listing timed out.";
+        }
+        const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+        return out.isEmpty() ? "No process output available." : out;
+    }
+
+    if (lowered == "take screenshot") {
+        handled = true;
+        const QString shotPath = rootDir.absoluteFilePath("data/processed/screenshot_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".png");
+        const bool ok = QProcess::startDetached("bash", {"-lc", "(gnome-screenshot -f \"" + shotPath + "\" || grim \"" + shotPath + "\" || scrot \"" + shotPath + "\") >/dev/null 2>&1"});
+        return ok ? ("Screenshot command triggered. Target: " + shotPath) : "Could not start screenshot command.";
+    }
+
+    if (lowered == "refresh app" || lowered == "refresh ui" || lowered == "reload ui" || lowered == "refresh") {
+        handled = true;
+        refreshUiNow();
+        if (input_ != nullptr) {
+            input_->setFocus();
+        }
+        return "App UI refreshed.";
+    }
+
+    if (lowered == "refresh auto on") {
+        handled = true;
+        auto_refresh_enabled_ = true;
+        if (auto_refresh_timer_ != nullptr && !auto_refresh_timer_->isActive()) {
+            auto_refresh_timer_->start(auto_refresh_interval_ms_);
+        }
+        refreshUiNow();
+        return QString("Auto-refresh enabled (%1s interval).")
+            .arg(QString::number(auto_refresh_interval_ms_ / 1000.0, 'f', 1));
+    }
+
+    if (lowered == "refresh auto off") {
+        handled = true;
+        auto_refresh_enabled_ = false;
+        if (auto_refresh_timer_ != nullptr) {
+            auto_refresh_timer_->stop();
+        }
+        updateAutoRefreshBadge();
+        return "Auto-refresh disabled.";
+    }
+
+    if (lowered == "refresh auto status" || lowered == "auto refresh status") {
+        handled = true;
+        return QString("Auto-refresh: %1 (%2s interval)")
+            .arg(auto_refresh_enabled_ ? "ON" : "OFF")
+            .arg(QString::number(auto_refresh_interval_ms_ / 1000.0, 'f', 1));
+    }
+
     if (lowered == "what can you control" || lowered == "apps") {
         handled = true;
-        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open <app>, open https://..., search <query>, close <app>, run <command>, voice status.";
+        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open downloads, search <query>, google <query>, open docs for <topic>, close browser, close <app>, run <command>, voice status, voice role, voice audit status, voice standby on, refresh auto status, volume up, volume down, mute, unmute, battery status, show running processes, take screenshot.";
     }
 
     return {};
@@ -635,6 +1317,7 @@ void MainWindow::runQuickAction(const QString& text) {
 QString MainWindow::generateAssistantReply(const QString& text) {
     ensureKnowledgeLoaded();
     const auto lowered = text.trimmed().toLower();
+    const auto inferredIntent = inferIntentCommand(text);
 
     if (lowered == "mode concise") {
         concise_mode_ = true;
@@ -675,9 +1358,12 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     bool handled = false;
-    const auto taskReply = tryHandleSystemTask(text, handled);
+    const auto taskReply = tryHandleSystemTask(inferredIntent.isEmpty() ? text : inferredIntent, handled);
     if (handled) {
-        return taskReply;
+        if (inferredIntent.isEmpty() || inferredIntent.compare(lowered, Qt::CaseInsensitive) == 0) {
+            return taskReply;
+        }
+        return QString("Intent: %1\n%2").arg(inferredIntent, taskReply);
     }
 
     if (lowered.startsWith("plan ") && lowered.size() > 5) {
@@ -848,7 +1534,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try: open chrome, open vs code, open terminal, search linux c++, run ls, close chrome, voice status, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
+        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try saying: I want to write some code, open the browser, open my downloads folder, google qt signals slots, open docs for cmake, close browser, create folder project-notes, show running processes, battery status, voice status, voice role, refresh auto status, volume up, volume down, mute, unmute, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
     }
 
     if (lowered.contains("status")) {
@@ -911,6 +1597,17 @@ QString MainWindow::generateAssistantReply(const QString& text) {
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     ensureKnowledgeLoaded();
     loadSafetyPolicy();
+    bool voiceOutputOk = false;
+    const auto voiceOutputRaw = qEnvironmentVariableIntValue("CODEBEAT_VOICE_OUTPUT", &voiceOutputOk);
+    voice_output_enabled_ = !voiceOutputOk || voiceOutputRaw != 0;
+
+    auto_refresh_timer_ = new QTimer(this);
+    auto_refresh_timer_->setInterval(auto_refresh_interval_ms_);
+    QObject::connect(auto_refresh_timer_, &QTimer::timeout, this, [this]() {
+        if (auto_refresh_enabled_) {
+            refreshUiNow();
+        }
+    });
     // Apply dark modern theme stylesheet
     setStyleSheet(
         "QMainWindow { background-color: #050505; }"
@@ -1016,10 +1713,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     hud_layout->addWidget(makeStatCard("MODEL", "TINY-LOCAL", "#8ad8ff"));
     hud_layout->addWidget(makeStatCard("AUTH", "ACTIVE", "#ff9cd0"));
 
-    auto* quick_label = new QLabel("Quick Control", hud_panel);
-    quick_label->setStyleSheet("color:#7ec7dd; font-family:'Segoe UI'; font-size:11px; font-weight:600; border:none;");
-    hud_layout->addWidget(quick_label);
-
     auto makeHudBtn = [hud_panel](const QString& txt) {
         auto* b = new QPushButton(txt, hud_panel);
         b->setFixedHeight(30);
@@ -1039,18 +1732,158 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         return b;
     };
 
-    auto* cmd_open_chrome = makeHudBtn("▶ open chrome");
-    auto* cmd_open_code = makeHudBtn("▶ open vs code");
-    auto* cmd_search_cpp = makeHudBtn("▶ search c++ qt tutorial");
-    auto* cmd_status = makeHudBtn("▶ status");
+    auto setThemedIcon = [this](QPushButton* btn, const QString& themeName, QStyle::StandardPixmap fallback) {
+        QIcon icon = QIcon::fromTheme(themeName);
+        if (icon.isNull()) {
+            icon = style()->standardIcon(fallback);
+        }
+        btn->setIcon(icon);
+    };
 
-    hud_layout->addWidget(cmd_open_chrome);
-    hud_layout->addWidget(cmd_open_code);
-    hud_layout->addWidget(cmd_search_cpp);
-    hud_layout->addWidget(cmd_status);
+    auto makeSectionToggle = [hud_panel](const QString& title, bool expanded) {
+        auto* b = new QPushButton((expanded ? "v " : "> ") + title, hud_panel);
+        b->setCheckable(true);
+        b->setChecked(expanded);
+        b->setProperty("sectionTitle", title);
+        b->setFixedHeight(26);
+        b->setStyleSheet(
+            "QPushButton {"
+            "  background-color:#0f1722;"
+            "  color:#7ec7dd;"
+            "  border:1px solid #23445a;"
+            "  border-radius:6px;"
+            "  text-align:left;"
+            "  padding-left:8px;"
+            "  font-family:'Segoe UI';"
+            "  font-size:11px;"
+            "  font-weight:600;"
+            "}"
+            "QPushButton:hover { border:1px solid #00d8ff; }"
+        );
+        return b;
+    };
+
+    auto* quick_toggle = makeSectionToggle("Quick Control", true);
+    auto* quick_content = new QFrame(hud_panel);
+    quick_content->setStyleSheet("QFrame { border:none; background: transparent; }");
+    auto* quick_content_layout = new QVBoxLayout(quick_content);
+    quick_content_layout->setContentsMargins(0, 4, 0, 0);
+    quick_content_layout->setSpacing(6);
+
+    auto* cmd_open_chrome = makeHudBtn("open chrome");
+    auto* cmd_open_code = makeHudBtn("open vs code");
+    auto* cmd_search_cpp = makeHudBtn("search c++ qt tutorial");
+    auto* cmd_status = makeHudBtn("status");
+    setThemedIcon(cmd_open_chrome, "internet-web-browser", QStyle::SP_DriveNetIcon);
+    setThemedIcon(cmd_open_code, "applications-development", QStyle::SP_DesktopIcon);
+    setThemedIcon(cmd_search_cpp, "edit-find", QStyle::SP_FileDialogContentsView);
+    setThemedIcon(cmd_status, "dialog-information", QStyle::SP_MessageBoxInformation);
+
+    quick_content_layout->addWidget(cmd_open_chrome);
+    quick_content_layout->addWidget(cmd_open_code);
+    quick_content_layout->addWidget(cmd_search_cpp);
+    quick_content_layout->addWidget(cmd_status);
+
+    auto* voice_toggle = makeSectionToggle("Voice Access", false);
+    auto* voice_content = new QFrame(hud_panel);
+    voice_content->setStyleSheet("QFrame { border:none; background: transparent; }");
+    auto* voice_content_layout = new QVBoxLayout(voice_content);
+    voice_content_layout->setContentsMargins(0, 4, 0, 0);
+    voice_content_layout->setSpacing(6);
+    voice_content->setVisible(false);
+
+    auto* cmd_voice_identity = makeHudBtn("voice identity status");
+    auto* cmd_voice_audit_status = makeHudBtn("voice audit status");
+    auto* cmd_voice_audit_summary = makeHudBtn("audit summary");
+    auto* cmd_open_voice_log = makeHudBtn("open voice log");
+    auto* cmd_open_logs_folder = makeHudBtn("open logs folder");
+    auto* cmd_open_latest_export = makeHudBtn("open latest export");
+    auto* cmd_copy_latest_export = makeHudBtn("copy latest export path");
+    auto* cmd_list_exports = makeHudBtn("list exports");
+    auto* cmd_voice_audit_clear = makeHudBtn("clear voice log");
+    auto* cmd_voice_audit_export = makeHudBtn("export voice log");
+    auto* cmd_standby_on = makeHudBtn("voice standby on");
+    auto* cmd_standby_off = makeHudBtn("voice standby off");
+    auto* cmd_standby_status = makeHudBtn("standby status");
+    auto* cmd_interrupt = makeHudBtn("stop listening");
+    auto* cmd_enroll_owner = makeHudBtn("voice enroll owner");
+    auto* cmd_enroll_trusted = makeHudBtn("voice enroll trusted");
+    setThemedIcon(cmd_voice_identity, "preferences-desktop-user", QStyle::SP_DirHomeIcon);
+    setThemedIcon(cmd_voice_audit_status, "view-list-details", QStyle::SP_FileDialogDetailedView);
+    setThemedIcon(cmd_voice_audit_summary, "dialog-information", QStyle::SP_MessageBoxInformation);
+    setThemedIcon(cmd_open_voice_log, "text-x-log", QStyle::SP_FileIcon);
+    setThemedIcon(cmd_open_logs_folder, "folder-open", QStyle::SP_DirOpenIcon);
+    setThemedIcon(cmd_open_latest_export, "document-open-recent", QStyle::SP_DirOpenIcon);
+    setThemedIcon(cmd_copy_latest_export, "edit-copy", QStyle::SP_FileDialogNewFolder);
+    setThemedIcon(cmd_list_exports, "view-list-text", QStyle::SP_FileDialogListView);
+    setThemedIcon(cmd_voice_audit_clear, "edit-clear", QStyle::SP_DialogResetButton);
+    setThemedIcon(cmd_voice_audit_export, "document-save-as", QStyle::SP_DialogSaveButton);
+    setThemedIcon(cmd_standby_on, "media-playback-start", QStyle::SP_MediaPlay);
+    setThemedIcon(cmd_standby_off, "media-playback-stop", QStyle::SP_MediaStop);
+    setThemedIcon(cmd_standby_status, "dialog-information", QStyle::SP_MessageBoxInformation);
+    setThemedIcon(cmd_interrupt, "process-stop", QStyle::SP_MediaStop);
+    setThemedIcon(cmd_enroll_owner, "emblem-favorite", QStyle::SP_DialogApplyButton);
+    setThemedIcon(cmd_enroll_trusted, "emblem-ok", QStyle::SP_DialogYesButton);
+
+    voice_content_layout->addWidget(cmd_voice_identity);
+    voice_content_layout->addWidget(cmd_voice_audit_status);
+    voice_content_layout->addWidget(cmd_voice_audit_summary);
+    voice_content_layout->addWidget(cmd_open_voice_log);
+    voice_content_layout->addWidget(cmd_open_logs_folder);
+    voice_content_layout->addWidget(cmd_open_latest_export);
+    voice_content_layout->addWidget(cmd_copy_latest_export);
+    voice_content_layout->addWidget(cmd_list_exports);
+    voice_content_layout->addWidget(cmd_voice_audit_clear);
+    voice_content_layout->addWidget(cmd_voice_audit_export);
+    voice_content_layout->addWidget(cmd_standby_on);
+    voice_content_layout->addWidget(cmd_standby_off);
+    voice_content_layout->addWidget(cmd_standby_status);
+    voice_content_layout->addWidget(cmd_interrupt);
+    voice_content_layout->addWidget(cmd_enroll_owner);
+    voice_content_layout->addWidget(cmd_enroll_trusted);
+
+    auto* system_toggle = makeSectionToggle("System Info", false);
+    auto* system_content = new QFrame(hud_panel);
+    system_content->setStyleSheet("QFrame { border:none; background: transparent; }");
+    auto* system_content_layout = new QVBoxLayout(system_content);
+    system_content_layout->setContentsMargins(0, 4, 0, 0);
+    system_content_layout->setSpacing(6);
+    system_content->setVisible(false);
+
+    auto* cmd_battery = makeHudBtn("check battery");
+    auto* cmd_processes = makeHudBtn("show running processes");
+    auto* cmd_screenshot = makeHudBtn("take screenshot");
+    auto* cmd_refresh_app = makeHudBtn("refresh app");
+    setThemedIcon(cmd_battery, "battery-good", QStyle::SP_DriveHDIcon);
+    setThemedIcon(cmd_processes, "utilities-system-monitor", QStyle::SP_ComputerIcon);
+    setThemedIcon(cmd_screenshot, "camera-photo", QStyle::SP_DesktopIcon);
+    setThemedIcon(cmd_refresh_app, "view-refresh", QStyle::SP_BrowserReload);
+    system_content_layout->addWidget(cmd_battery);
+    system_content_layout->addWidget(cmd_processes);
+    system_content_layout->addWidget(cmd_screenshot);
+    system_content_layout->addWidget(cmd_refresh_app);
+
+    auto bindSection = [this](QPushButton* toggle, QFrame* content) {
+        QObject::connect(toggle, &QPushButton::clicked, this, [toggle, content](bool checked) {
+            content->setVisible(checked);
+            const QString title = toggle->property("sectionTitle").toString();
+            toggle->setText((checked ? "v " : "> ") + title);
+        });
+    };
+
+    bindSection(quick_toggle, quick_content);
+    bindSection(voice_toggle, voice_content);
+    bindSection(system_toggle, system_content);
+
+    hud_layout->addWidget(quick_toggle);
+    hud_layout->addWidget(quick_content);
+    hud_layout->addWidget(voice_toggle);
+    hud_layout->addWidget(voice_content);
+    hud_layout->addWidget(system_toggle);
+    hud_layout->addWidget(system_content);
     hud_layout->addStretch();
 
-    auto* terminal_hint = new QLabel("Tip: type `what can you control` for full command list.", hud_panel);
+    auto* terminal_hint = new QLabel("Tip: type `what can you control` or try `I want to write some code` for natural-language control.", hud_panel);
     terminal_hint->setWordWrap(true);
     terminal_hint->setStyleSheet("color:#7a8b97; font-family:'Monospace'; font-size:10px; border:none;");
     hud_layout->addWidget(terminal_hint);
@@ -1180,13 +2013,53 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     input_row->addWidget(sendBtn);
     input_layout->addLayout(input_row);
 
+    auto* voice_mode_row = new QHBoxLayout();
+    voice_mode_row->setContentsMargins(0, 0, 0, 0);
+    voice_mode_row->setSpacing(0);
+
+    auto* voice_mode_badge = new QLabel(input_section);
+    voice_mode_badge->setText("VOICE: READY");
+    voiceModeBadge_ = voice_mode_badge;
+    updateVoiceModeBadge();
+    voice_mode_row->addWidget(voice_mode_badge);
+
+    auto* auto_refresh_badge = new QLabel(input_section);
+    autoRefreshBadge_ = auto_refresh_badge;
+    updateAutoRefreshBadge();
+    voice_mode_row->addStretch();
+    voice_mode_row->addWidget(auto_refresh_badge);
+    input_layout->addLayout(voice_mode_row);
+
+    auto* heard_queue_row = new QHBoxLayout();
+    heard_queue_row->setContentsMargins(0, 0, 0, 0);
+    heard_queue_row->setSpacing(0);
+
+    auto* heard_queue_badge = new QLabel(input_section);
+    heard_queue_badge->setStyleSheet(
+        "QLabel {"
+        "  background-color: #10161f;"
+        "  color: #a8d8ff;"
+        "  border: 1px solid #2d4f66;"
+        "  border-radius: 7px;"
+        "  padding: 5px 8px;"
+        "  font-family: 'Monospace';"
+        "  font-size: 9px;"
+        "  font-weight: 600;"
+        "}"
+    );
+    heardQueueBadge_ = heard_queue_badge;
+    updateHeardQueueBadge();
+    heard_queue_row->addWidget(heard_queue_badge);
+    heard_queue_row->addStretch();
+    input_layout->addLayout(heard_queue_row);
+
     // Quick action buttons
     auto* quick_btns_layout = new QHBoxLayout();
     quick_btns_layout->setSpacing(8);
     
     QStringList quick_actions = {
-        "💡 Help", "📊 Status", "🧠 Learn", "🎙 Voice IO", "🧹 Clear",
-        "🌐 Chrome", "🧩 VS Code", "🖥 Terminal"
+        "Help", "Status", "Learn", "Voice IO", "Clear",
+        "Chrome", "VS Code", "Terminal"
     };
     auto btn_style = [](const QString& gradient_start, const QString& gradient_end) -> QString {
         return QString(
@@ -1223,6 +2096,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         quick_btns_layout->addWidget(btn);
         quickButtons.push_back(btn);
     }
+
+    if (quickButtons.size() >= 8) {
+        setThemedIcon(quickButtons[0], "help-browser", QStyle::SP_MessageBoxQuestion);
+        setThemedIcon(quickButtons[1], "dialog-information", QStyle::SP_MessageBoxInformation);
+        setThemedIcon(quickButtons[2], "applications-education", QStyle::SP_DialogHelpButton);
+        setThemedIcon(quickButtons[3], "audio-input-microphone", QStyle::SP_MediaVolume);
+        setThemedIcon(quickButtons[4], "edit-clear", QStyle::SP_DialogResetButton);
+        setThemedIcon(quickButtons[5], "internet-web-browser", QStyle::SP_DriveNetIcon);
+        setThemedIcon(quickButtons[6], "applications-development", QStyle::SP_DesktopIcon);
+        setThemedIcon(quickButtons[7], "utilities-terminal", QStyle::SP_ComputerIcon);
+    }
     
     quick_btns_layout->addStretch();
     input_layout->addLayout(quick_btns_layout);
@@ -1244,6 +2128,26 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     QObject::connect(cmd_open_code, &QPushButton::clicked, this, [this]() { runQuickAction("open vs code"); });
     QObject::connect(cmd_search_cpp, &QPushButton::clicked, this, [this]() { runQuickAction("search c++ qt tutorial"); });
     QObject::connect(cmd_status, &QPushButton::clicked, this, [this]() { runQuickAction("status"); });
+    QObject::connect(cmd_voice_identity, &QPushButton::clicked, this, [this]() { runQuickAction("voice identity status"); });
+    QObject::connect(cmd_voice_audit_status, &QPushButton::clicked, this, [this]() { runQuickAction("voice audit status"); });
+    QObject::connect(cmd_voice_audit_summary, &QPushButton::clicked, this, [this]() { runQuickAction("voice audit summary"); });
+    QObject::connect(cmd_open_voice_log, &QPushButton::clicked, this, [this]() { runQuickAction("open voice log"); });
+    QObject::connect(cmd_open_logs_folder, &QPushButton::clicked, this, [this]() { runQuickAction("open logs folder"); });
+    QObject::connect(cmd_open_latest_export, &QPushButton::clicked, this, [this]() { runQuickAction("open latest export"); });
+    QObject::connect(cmd_copy_latest_export, &QPushButton::clicked, this, [this]() { runQuickAction("copy latest export path"); });
+    QObject::connect(cmd_list_exports, &QPushButton::clicked, this, [this]() { runQuickAction("list exports"); });
+    QObject::connect(cmd_voice_audit_clear, &QPushButton::clicked, this, [this]() { runQuickAction("voice audit clear"); });
+    QObject::connect(cmd_voice_audit_export, &QPushButton::clicked, this, [this]() { runQuickAction("voice audit export"); });
+    QObject::connect(cmd_standby_on, &QPushButton::clicked, this, [this]() { runQuickAction("voice standby on"); });
+    QObject::connect(cmd_standby_off, &QPushButton::clicked, this, [this]() { runQuickAction("voice standby off"); });
+    QObject::connect(cmd_standby_status, &QPushButton::clicked, this, [this]() { runQuickAction("voice standby status"); });
+    QObject::connect(cmd_interrupt, &QPushButton::clicked, this, [this]() { runQuickAction("stop listening"); });
+    QObject::connect(cmd_enroll_owner, &QPushButton::clicked, this, [this]() { runQuickAction("voice enroll owner"); });
+    QObject::connect(cmd_enroll_trusted, &QPushButton::clicked, this, [this]() { runQuickAction("voice enroll trusted"); });
+    QObject::connect(cmd_battery, &QPushButton::clicked, this, [this]() { runQuickAction("check battery"); });
+    QObject::connect(cmd_processes, &QPushButton::clicked, this, [this]() { runQuickAction("show running processes"); });
+    QObject::connect(cmd_screenshot, &QPushButton::clicked, this, [this]() { runQuickAction("take screenshot"); });
+    QObject::connect(cmd_refresh_app, &QPushButton::clicked, this, [this]() { runQuickAction("refresh app"); });
     QObject::connect(voiceBtn, &QPushButton::clicked, this, [this]() { startVoiceCapture(); });
     QObject::connect(lockBtn, &QPushButton::clicked, this, [this]() { emit lockRequested(); });
 
@@ -1261,7 +2165,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Welcome with styled text
     chatView_->append("<span style='color: #ff6b9d; font-weight: bold;'>[⚡ CODEBEAT]</span>");
     chatView_->append("<span style='color: #00ffff;'>System initialized and live. Good to see you.</span>");
-    chatView_->append("<span style='color: #8b3dff;'>Try: open chrome, open vs code, open terminal, run ls, voice status, help, or use 🎙 VOICE.</span>");
+    chatView_->append("<span style='color: #8b3dff;'>Try: I want to write some code, create folder project-notes, open chrome, voice status, refresh auto on, or use 🎙 VOICE.</span>");
     chatView_->append("");
 }
 
@@ -1304,6 +2208,7 @@ void MainWindow::onSend() {
                       .arg(response_color, response));
     memory_.push("assistant: " + response.toStdString());
     last_user_message_ = text;
+    speakText(response);
     input_->clear();
     input_->setFocus();
 }

@@ -48,6 +48,7 @@ WHISPER_MODEL="${CODEBEAT_WHISPER_MODEL:-tiny.en}"
 VOICE_AUTO_SOURCE="${CODEBEAT_VOICE_AUTO_SOURCE:-1}"
 VOICE_MIN_RMS="${CODEBEAT_VOICE_MIN_RMS:-0.0025}"
 VOICE_DEBUG="${CODEBEAT_VOICE_DEBUG:-0}"
+VOICE_SAVE_LAST="${CODEBEAT_VOICE_SAVE_LAST:-1}"
 
 raw_to_wav() {
   local raw_path="$1"
@@ -213,6 +214,11 @@ record_audio() {
 if ! record_audio; then
   echo "No working microphone recorder found. Install/use one of: arecord, pw-record (PipeWire), parec (PulseAudio), or ffmpeg." >&2
   exit 2
+fi
+
+if [[ "$VOICE_SAVE_LAST" == "1" ]]; then
+  mkdir -p "$ROOT_DIR/data/processed" >/dev/null 2>&1 || true
+  cp "$TMP_WAV" "$ROOT_DIR/data/processed/last_voice.wav" >/dev/null 2>&1 || true
 fi
 
 if command -v whisper >/dev/null 2>&1; then

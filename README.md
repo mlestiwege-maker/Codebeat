@@ -26,6 +26,24 @@ From-scratch C++ AI assistant project (tiny-first curriculum), with a Qt desktop
 - If `CODEBEAT_FACE_ONLY=1`, the splash auto-scans your face on startup and hides passkey unlock controls.
 - Face verification now probes available camera indexes and auto-picks the camera with the strongest face signal.
 - In main app, click **LOCK** (or type `lock`) to return to splash access screen.
+- Left tactical panel with **collapsible sections** for clean UI:
+	- **Quick Control** (always expanded): open chrome, open vs code, search tutorial, status
+	- **Voice Access** (▶ collapsed by default): click the arrow to expand and access voice identity, audit controls, standby tuning, and enrollment
+		- `voice identity status`, `voice audit status`, `voice audit summary`
+		- `open voice log`, `open logs folder`, `open latest export`, `copy latest export path`, `list exports`
+		- `voice audit clear`, `voice audit export`
+		- `voice standby on/off`, `voice standby status`, `voice standby sensitivity up/down`, `voice standby window <seconds>`
+		- `stop listening`, `go to sleep`, `quiet mode` (interrupt voice capture mid-stream)
+		- `voice enroll owner`, `voice enroll trusted`
+	- **System Info** (▶ collapsed by default): click the arrow to expand and access battery, processes, screenshot quick-access buttons
+- **Voice Role Badge** (live indicator on tactical panel) displays real-time status:
+	- Green ✓ `VOICE ROLE: owner` (owner voice detected)
+	- Yellow ⚡ `VOICE ROLE: trusted` (trusted voice detected)
+	- Gray ◯ `VOICE ROLE: unknown` (no match)
+	- Dark gray ◯ `VOICE ROLE: disabled` (voice identity off)
+	- Auto-updates whenever voice is captured and evaluated
+	- **First-time setup:** Run `voice enroll owner` to create your owner profile, then captures will show your identity
+	- If badge stays `unknown`, check that a voice profile exists: `ls -la data/processed/voice_owner_profile.npz`
 - Black premium UI theme with neon accents.
 
 ## App/task control commands
@@ -35,13 +53,41 @@ Inside Codebeat chat, you can now run:
 - `open chrome`
 - `open vs code`
 - `open terminal`
+- `open downloads`
+- `create folder project-notes`
 - `open <app_name>`
 - `open https://<url>`
 - `search <query>`
+- `google <query>` / `look up <query>`
+- `open docs for <topic>`
+- `close browser` / `close chrome`
 - `close <app_name>`
 - `run <shell_command>`
 - `execute <shell_command>`
+- `auth face`
+- `auth passkey <your-passkey>`
 - `voice status`
+- `voice audit status`
+- `voice audit summary`
+- `voice audit open`
+- `voice audit folder`
+- `voice audit open latest`
+- `voice audit copy latest`
+- `voice audit list exports`
+- `voice audit clear`
+- `voice audit export`
+- `voice standby on` / `voice standby off`
+- `voice standby status`
+- `voice standby sensitivity up` / `voice standby sensitivity down`
+- `voice standby window 6`
+- `voice identity status`
+- `voice enroll owner`
+- `voice enroll trusted`
+- `check battery` / `battery status`
+- `show running processes`
+- `take screenshot`
+- `refresh app` / `refresh ui`
+- `refresh auto on` / `refresh auto off` / `refresh auto status`
 - `what can you control`
 - `learn: <fact>`
 - `knowledge status`
@@ -51,8 +97,25 @@ Inside Codebeat chat, you can now run:
 - `rewrite: <style>::<text>`
 - `summarize: <text>`
 - `mode concise` / `mode detailed` / `mode status`
+- natural language examples:
+	- `I want to write some code` → opens VS Code
+	- `please create a folder called project-notes` → creates a local folder in your home directory
+	- `show voice status` → checks the current voice mode and capture state
+	- `turn auto refresh on` → enables automatic UI refreshes
+	- `open my downloads folder` → opens `~/Downloads`
+	- `make standby more sensitive` → shortens the wake-command window
+	- `make standby less sensitive` → lengthens the wake-command window
+	- `show standby status` → prints the current standby state and wake window
+	- `increase the wake window` → makes standby less sensitive
+	- `show running processes` → runs `ps aux`
+	- `check battery` → checks battery state
+	- `google qt signals slots` → opens a web search
+	- `open docs for cmake` → searches documentation
+	- `close browser` → closes Chrome/Chromium if running
+	- `volume up` / `volume down` / `mute` / `unmute` → controls audio
+	- `take screenshot` → captures the screen
 
-### Safety guards for risky commands
+### Safety + critical-auth guards
 
 Tool-use commands like `run` and `execute` are protected by a **confirmation gate**:
 
@@ -60,17 +123,27 @@ Tool-use commands like `run` and `execute` are protected by a **confirmation gat
 - Codebeat will respond with: "Execute: <cmd>?\n\nReply 'yes' to confirm or 'no' to cancel."
 - Reply with `yes`, `y`, or `confirm` to execute. Reply with `no`, `n`, or `cancel` to abort.
 - This prevents accidental script execution and maintains audit clarity (you always see _what_ Codebeat intends to run).
+- Critical operations (`sudo`, `shutdown`, `reboot`, destructive commands, etc.) can require a second authentication step.
+- For critical tasks, Codebeat asks you to authenticate using:
+  - `auth face` (runs local face verification), or
+  - `auth passkey <your-passkey>` (if configured in `.env`).
 - You can disable confirmation per-command via `.env`:
 	- `CODEBEAT_CONFIRM_RUN=0` to skip confirmation for `run <cmd>`
 	- `CODEBEAT_CONFIRM_EXECUTE=0` to skip confirmation for `execute <cmd>`
 	- `CODEBEAT_SAFETY_MODE=0` to disable all safety guards globally (not recommended).
-- `rewrite: <style>::<text>`
-- `summarize: <text>`
-- `mode concise` / `mode detailed` / `mode status`
 
 Voice control:
 
 - Click `🎙 VOICE` in the main app and speak a command.
+- Codebeat writes down the transcript it heard, runs the command, and speaks concise replies aloud when `spd-say` is available.
+- Voice mode badge now reflects live state: `READY`, `STANDBY`, `LISTENING`, and `SPEAKING`.
+- Auto-refresh badge now shows live state: `OFF` or `ON (<interval>s)`.
+- A compact **Heard queue** strip shows the last 3 normalized transcripts for quick verification before/after execution.
+- Continuous standby mode (wake + command loop):
+	- Type `voice standby on` to enable always-listening standby.
+	- Say any wake alias (from `CODEBEAT_WAKE_ALIASES`), for example: `hey codebeat`, `hello friend`, `dad's son`.
+	- Codebeat responds with **Listening...** and accepts your next command.
+	- Say `stop listening`, `sleep mode`, `go to sleep`, or run `voice standby off` to pause standby mode.
 - Linux voice backend order:
 	1) recorder: `arecord` -> `pw-record` -> `parec` -> `ffmpeg`
 	2) transcriber: `whisper` CLI (or Python `openai-whisper` fallback)
@@ -78,6 +151,19 @@ Voice control:
 - Voice decode now retries with normalized/boosted audio for low-volume microphone input.
 - If voice fails, Codebeat now shows backend-specific error text in chat.
 - Run `voice status` in chat to see detected recorder/ASR backends and active candidates.
+- Run `voice audit status` to check voice audit log health and last recorded entry.
+- Run `voice audit summary` to see a compact report with counts, last role/score, and paths.
+- Run `voice audit open` to open the audit log file in your system viewer/editor.
+- Run `voice audit folder` to open the folder containing audit snapshots and logs.
+- Run `voice audit open latest` to open the most recent exported snapshot directly.
+- Run `voice audit copy latest` to copy the most recent exported snapshot path to your clipboard.
+- Run `voice audit list exports` to print the recent exported snapshots in chat.
+- Run `voice audit clear` to clear the audit log after confirmation.
+- Run `voice audit export` to create a timestamped snapshot copy of the audit log.
+- Run `voice identity status` to see whether the current speaker matches owner profile.
+- Run `voice enroll owner` once to create/update local owner voice profile.
+- Run `voice enroll trusted` to enroll one trusted non-owner voice profile.
+- Voice-triggered turns are logged to `data/logs/voice_commands.log` with timestamp, role, score, command, and outcome.
 - Runtime replies now also consult `data/raw/corpus.txt` for lightweight local knowledge grounding.
 
 Optional safety policy tuning env vars:
@@ -85,6 +171,15 @@ Optional safety policy tuning env vars:
 - `CODEBEAT_SAFETY_MODE` (default: `1`) Enable (1) or disable (0) all safety guards
 - `CODEBEAT_CONFIRM_RUN` (default: `1`) Require confirmation before executing `run <cmd>` (1=yes, 0=no)
 - `CODEBEAT_CONFIRM_EXECUTE` (default: `1`) Require confirmation before executing `execute <cmd>` (1=yes, 0=no)
+- `CODEBEAT_REQUIRE_AUTH_CRITICAL` (default: `1`) Require step-up authentication for critical commands
+- `CODEBEAT_CRITICAL_PASSKEY` (optional) Passkey value used by `auth passkey <value>`
+- `CODEBEAT_CRITICAL_AUTH_TTL` (default: `120`) Seconds critical auth remains valid after success
+- `CODEBEAT_WAKE_ALIASES` (default includes `codebeat,hey codebeat,hello codebeat,hello friend,dad's son`) comma-separated wake aliases for voice normalization
+- `CODEBEAT_WAKE_WINDOW_SECONDS` (default: `8`) seconds after wake phrase to accept the next command in standby mode
+- `CODEBEAT_VOICE_OWNER_MODE` (default: `1`) enable owner-voice recognition checks
+- `CODEBEAT_VOICE_OWNER_FOR_CRITICAL` (default: `1`) require owner voice for critical **voice-triggered** actions
+
+Note: if an alias contains an apostrophe (example `dad's son`), wrap the whole `.env` value in double quotes to avoid shell parse errors.
 
 When confirmation is required, Codebeat will ask: "Execute: <cmd>?\n\nReply 'yes' to confirm or 'no' to cancel."
 
@@ -96,6 +191,8 @@ Optional voice tuning env vars:
 - `CODEBEAT_VOICE_AUTO_SOURCE` (default: `1`) to auto-select the Pulse source with strongest voice signal
 - `CODEBEAT_VOICE_MIN_RMS` (default: `0.0025`) minimum signal floor used during source auto-selection
 - `CODEBEAT_VOICE_DEBUG` (default: `0`) set to `1` to print selected mic source and extra voice diagnostics to stderr
+- `CODEBEAT_VOICE_SAVE_LAST` (default: `1`) save the latest capture to `data/processed/last_voice.wav` for voice identity checks
+- `CODEBEAT_VOICE_OUTPUT` (default: `1`) speak assistant replies aloud with `spd-say` when available; set to `0` for silent mode
 - `CODEBEAT_CAMERA_INDEX` (default: `0`) to choose webcam index for face enroll/verify
 - `CODEBEAT_FACE_THRESHOLD` (optional, default profile value `0.88`) to tune owner-match strictness
 

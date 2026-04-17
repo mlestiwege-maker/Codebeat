@@ -13,6 +13,11 @@ codebeat_repl
 
 # Generated model checkpoints
 data/processed/*.bin
+data/processed/*.wav
+data/processed/*.npz
+
+# Generated runtime logs and snapshots
+data/logs/
 
 # IDE / editor
 .vscode/
