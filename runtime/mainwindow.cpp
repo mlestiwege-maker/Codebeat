@@ -545,6 +545,40 @@ QString MainWindow::inferIntentCommand(const QString& text) const {
         return "voice enroll trusted";
     }
 
+    if ((has("code") || has("coding") || has("project")) && has("status")) {
+        return "code status";
+    }
+
+    if ((has("summarize") || has("summary")) && has("diff")) {
+        return "code diff summary";
+    }
+
+    if (has("recent") && has("commit")) {
+        return "code recent commits";
+    }
+
+    {
+        QRegularExpression openFileRx(R"(^(?:please\s+)?(?:open|show)\s+(?:project\s+)?file\s+(.+)$)");
+        const auto m = openFileRx.match(normalized);
+        if (m.hasMatch()) {
+            const auto rel = m.captured(1).trimmed();
+            if (!rel.isEmpty()) {
+                return "open project file " + rel;
+            }
+        }
+    }
+
+    {
+        QRegularExpression branchRx(R"(^(?:please\s+)?(?:create|start)\s+(?:a\s+)?(?:feature\s+)?branch\s+(.+)$)");
+        const auto m = branchRx.match(normalized);
+        if (m.hasMatch()) {
+            const auto branch = m.captured(1).trimmed();
+            if (!branch.isEmpty()) {
+                return "create feature branch " + branch;
+            }
+        }
+    }
+
     return {};
 }
 
@@ -1487,6 +1521,97 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
         return ok ? "Started trusted voice enrollment." : "Failed to start trusted enrollment.";
     }
 
+    if (lowered == "code status" || lowered == "project status") {
+        handled = true;
+        QProcess proc;
+        proc.start("bash", {"-lc", "cd \"" + rootDir.absolutePath() + "\" && git status -sb"});
+        if (!proc.waitForFinished(6000)) {
+            proc.kill();
+            return "Code status timed out.";
+        }
+        const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+        const auto err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+            return err.isEmpty() ? "Could not read code status. Is this folder a git repo?" : err.left(240);
+        }
+        return out.isEmpty() ? "No git status output available." : out;
+    }
+
+    if (lowered == "code diff summary" || lowered == "diff summary" || lowered == "summarize diff") {
+        handled = true;
+        QProcess proc;
+        proc.start("bash", {"-lc", "cd \"" + rootDir.absolutePath() + "\" && git --no-pager diff --stat"});
+        if (!proc.waitForFinished(6000)) {
+            proc.kill();
+            return "Diff summary timed out.";
+        }
+        const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+        const auto err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+            return err.isEmpty() ? "Could not summarize diff." : err.left(240);
+        }
+        return out.isEmpty() ? "No unstaged diff right now." : out;
+    }
+
+    if (lowered == "code recent commits" || lowered == "recent commits") {
+        handled = true;
+        QProcess proc;
+        proc.start("bash", {"-lc", "cd \"" + rootDir.absolutePath() + "\" && git --no-pager log --oneline -5"});
+        if (!proc.waitForFinished(6000)) {
+            proc.kill();
+            return "Recent commits query timed out.";
+        }
+        const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+        const auto err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+            return err.isEmpty() ? "Could not read recent commits." : err.left(240);
+        }
+        return out.isEmpty() ? "No commit history available." : out;
+    }
+
+    if (lowered.startsWith("open project file ") && lowered.size() > 18) {
+        handled = true;
+        const auto relPathRaw = text.mid(18).trimmed();
+        if (relPathRaw.isEmpty()) {
+            return "Usage: open project file <relative/path>";
+        }
+        const auto relPath = relPathRaw;
+        if (relPath.contains("..")) {
+            return "Blocked: parent-path traversal is not allowed for project file open.";
+        }
+
+        const auto absPath = rootDir.absoluteFilePath(relPath);
+        QFileInfo fi(absPath);
+        if (!fi.exists()) {
+            return "Project file not found: " + relPath;
+        }
+
+        const bool ok = QProcess::startDetached("xdg-open", {absPath});
+        return ok ? ("Opening project file: " + relPath) : "Could not open project file.";
+    }
+
+    if (lowered.startsWith("create feature branch ") && lowered.size() > 22) {
+        handled = true;
+        const auto branchName = text.mid(22).trimmed();
+        static const QRegularExpression branchRx(R"(^[A-Za-z0-9._\/-]{2,80}$)");
+        if (!branchRx.match(branchName).hasMatch()) {
+            return "Invalid branch name. Use letters, digits, ., _, -, / only.";
+        }
+
+        QProcess proc;
+        proc.start("bash", {"-lc", "cd \"" + rootDir.absolutePath() + "\" && git checkout -b \"" + branchName + "\""});
+        if (!proc.waitForFinished(7000)) {
+            proc.kill();
+            return "Branch creation timed out.";
+        }
+        const auto out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+        const auto err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+            return err.isEmpty() ? "Could not create branch." : err.left(240);
+        }
+        return out.isEmpty() ? ("Created and switched to branch: " + branchName) : out.left(260);
+    }
+
     if (lowered == "check battery" || lowered == "battery status") {
         handled = true;
         QProcess proc;
@@ -1557,7 +1682,7 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
 
     if (lowered == "what can you control" || lowered == "apps") {
         handled = true;
-        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open downloads, search <query>, google <query>, open docs for <topic>, close browser, close <app>, run <command>, plugin status, plugin reload, voice status, voice role, voice audit status, voice standby on, refresh auto status, volume up, volume down, mute, unmute, battery status, show running processes, take screenshot.";
+        return "I can open apps and run tasks. Try: open chrome, open vs code, open terminal, open downloads, search <query>, google <query>, open docs for <topic>, close browser, close <app>, run <command>, code status, code diff summary, code recent commits, open project file <path>, create feature branch <name>, plugin status, plugin reload, voice status, voice role, voice audit status, voice standby on, refresh auto status, volume up, volume down, mute, unmute, battery status, show running processes, take screenshot.";
     }
 
     const auto pluginReply = tryHandlePluginCommand(text, handled);
@@ -1793,7 +1918,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try saying: I want to write some code, open the browser, open my downloads folder, google qt signals slots, open docs for cmake, close browser, create folder project-notes, show running processes, battery status, voice status, voice role, ollama status, local ai explain recursion, plugin status, plugin reload, refresh auto status, volume up, volume down, mute, unmute, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
+        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try saying: I want to write some code, open the browser, open my downloads folder, google qt signals slots, open docs for cmake, close browser, create folder project-notes, code status, code diff summary, code recent commits, open project file README.md, create feature branch feature/voice-coding, show running processes, battery status, voice status, voice role, ollama status, local ai explain recursion, plugin status, plugin reload, refresh auto status, volume up, volume down, mute, unmute, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
     }
 
     if (lowered.contains("status")) {

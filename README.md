@@ -90,6 +90,11 @@ Inside Codebeat chat, you can now run:
 - `take screenshot`
 - `refresh app` / `refresh ui`
 - `refresh auto on` / `refresh auto off` / `refresh auto status`
+- `code status`
+- `code diff summary`
+- `code recent commits`
+- `open project file <relative/path>`
+- `create feature branch <name>`
 - `plugin status` / `plugin reload`
 - `what can you control`
 - `learn: <fact>`
@@ -117,6 +122,11 @@ Inside Codebeat chat, you can now run:
 	- `close browser` → closes Chrome/Chromium if running
 	- `ollama status` → shows whether local Ollama support is enabled
 	- `local ai explain recursion` → asks the local Ollama model a question
+	- `code status` → shows current git branch + working tree summary
+	- `code diff summary` → shows file-level diff stats
+	- `code recent commits` → shows the latest 5 commit subjects
+	- `open project file README.md` → opens a repository file in your system editor
+	- `create feature branch feature/voice-coding` → creates/switches to a new branch
 	- `plugin status` → shows plugin file path + loaded plugin count
 	- `plugin reload` → reloads command plugins from disk
 	- `volume up` / `volume down` / `mute` / `unmute` → controls audio
