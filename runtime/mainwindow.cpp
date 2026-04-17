@@ -19,6 +19,10 @@
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QStandardPaths>
 #include <QProcess>
 #include <QStyle>
@@ -865,6 +869,104 @@ void MainWindow::startVoiceCapture() {
     proc->start("bash", {"-lc", "\"" + scriptPath + "\""});
 }
 
+QString MainWindow::ollamaStatus() const {
+    if (!ollama_enabled_) {
+        return QString("Local AI (Ollama) is disabled. Enable it with CODEBEAT_OLLAMA_ENABLED=1.");
+    }
+
+    QProcess proc;
+    proc.start("bash", {"-lc", "command -v curl"});
+    if (!proc.waitForFinished(3000) || proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+        return "Local AI is enabled, but curl is unavailable. Install curl or disable Ollama integration.";
+    }
+
+    return QString("Local AI is enabled. Model: %1 | Endpoint: %2/api/chat | Transport: curl")
+        .arg(ollama_model_, ollama_base_url_);
+}
+
+QString MainWindow::ollamaReply(const QString& prompt) const {
+    if (!ollama_enabled_) {
+        return {};
+    }
+
+    const auto userPrompt = prompt.trimmed();
+    if (userPrompt.isEmpty()) {
+        return {};
+    }
+
+    const QString baseUrl = ollama_base_url_.trimmed().isEmpty() ? QString("http://localhost:11434") : ollama_base_url_.trimmed();
+    const QString endpoint = baseUrl.endsWith('/') ? baseUrl + "api/chat" : baseUrl + "/api/chat";
+
+    QJsonObject payload;
+    payload.insert("model", ollama_model_.trimmed().isEmpty() ? QString("llama3.2") : ollama_model_.trimmed());
+    payload.insert("stream", false);
+
+    QJsonArray messages;
+    messages.append(QJsonObject{{"role", "system"}, {"content", "You are Codebeat, a concise local coding assistant inside a C++ Qt desktop app. Prefer practical, step-by-step answers, and mention when something needs a terminal command or file edit."}});
+    messages.append(QJsonObject{{"role", "user"}, {"content", userPrompt}});
+    payload.insert("messages", messages);
+    payload.insert("options", QJsonObject{{"temperature", 0.4}, {"top_p", 0.9}});
+
+    const QByteArray json = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+
+    QProcess proc;
+    proc.start("curl", {
+        "--silent",
+        "--show-error",
+        "--fail",
+        "--max-time", "30",
+        "-H", "Content-Type: application/json",
+        "--data-binary", "@-",
+        endpoint
+    });
+
+    if (!proc.waitForStarted(2000)) {
+        return {};
+    }
+
+    proc.write(json);
+    proc.closeWriteChannel();
+
+    if (!proc.waitForFinished(35000)) {
+        proc.kill();
+        return {};
+    }
+
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+        return {};
+    }
+
+    const auto stdoutData = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+    if (stdoutData.isEmpty()) {
+        return {};
+    }
+
+    QJsonParseError parseError{};
+    const auto doc = QJsonDocument::fromJson(stdoutData.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        return {};
+    }
+
+    const auto root = doc.object();
+    QString content;
+    if (root.contains("message") && root.value("message").isObject()) {
+        content = root.value("message").toObject().value("content").toString().trimmed();
+    }
+    if (content.isEmpty() && root.contains("response")) {
+        content = root.value("response").toString().trimmed();
+    }
+
+    if (content.isEmpty()) {
+        return {};
+    }
+
+    if (content.size() > 1600) {
+        content = content.left(1597).trimmed() + "...";
+    }
+
+    return content;
+}
+
 QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
     handled = false;
     const auto lowered = text.trimmed().toLower();
@@ -1007,6 +1109,24 @@ QString MainWindow::tryHandleSystemTask(const QString& text, bool& handled) {
         return QString("Voice role: %1\nScore: %2")
             .arg(last_voice_role_)
             .arg(QString::number(last_voice_score_, 'f', 3));
+    }
+
+    if (lowered == "ollama status" || lowered == "local ai status" || lowered == "local model status") {
+        handled = true;
+        return ollamaStatus();
+    }
+
+    if ((lowered.startsWith("local ai ") && lowered.size() > 9) ||
+        (lowered.startsWith("ask local ") && lowered.size() > 10) ||
+        (lowered.startsWith("ollama ") && lowered.size() > 7)) {
+        handled = true;
+        const QString prompt = lowered.startsWith("local ai ") ? text.mid(9).trimmed()
+                               : lowered.startsWith("ask local ") ? text.mid(10).trimmed()
+                               : text.mid(7).trimmed();
+        const auto reply = ollamaReply(prompt);
+        return reply.isEmpty()
+            ? "Local AI is not available right now. Try `ollama status` or enable Ollama in .env."
+            : "Local AI:\n" + reply;
     }
 
     if (lowered == "voice role" || lowered == "voice identity" || lowered == "voice profile status" ||
@@ -1534,7 +1654,7 @@ QString MainWindow::generateAssistantReply(const QString& text) {
     }
 
     if (lowered.contains("help")) {
-        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try saying: I want to write some code, open the browser, open my downloads folder, google qt signals slots, open docs for cmake, close browser, create folder project-notes, show running processes, battery status, voice status, voice role, refresh auto status, volume up, volume down, mute, unmute, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
+        return "I can chat naturally, remember context, summarize, answer questions, and control your system. Try saying: I want to write some code, open the browser, open my downloads folder, google qt signals slots, open docs for cmake, close browser, create folder project-notes, show running processes, battery status, voice status, voice role, ollama status, local ai explain recursion, refresh auto status, volume up, volume down, mute, unmute, learn: Codebeat should be concise, knowledge status, plan ship release this week, brainstorm onboarding flow, compare vscode vs vim, rewrite: concise::your text, mode concise, status, time.";
     }
 
     if (lowered.contains("status")) {
@@ -1562,6 +1682,15 @@ QString MainWindow::generateAssistantReply(const QString& text) {
 
     if (lowered.contains("thank")) {
         return "Always. Keep going — we’re making great progress.";
+    }
+
+    if (ollama_enabled_) {
+        const bool looksLikeQuestion = text.trimmed().endsWith('?') || lowered.startsWith("explain ") || lowered.startsWith("how do ") || lowered.startsWith("why ") || lowered.startsWith("what is ") || lowered.startsWith("write ") || lowered.startsWith("draft ");
+        if (looksLikeQuestion) {
+            if (const auto localReply = ollamaReply(text); !localReply.isEmpty()) {
+                return localReply;
+            }
+        }
     }
 
     if (text.trimmed().endsWith('?')) {
@@ -1597,6 +1726,17 @@ QString MainWindow::generateAssistantReply(const QString& text) {
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     ensureKnowledgeLoaded();
     loadSafetyPolicy();
+    bool ollamaEnabledOk = false;
+    const auto ollamaEnabledRaw = qEnvironmentVariableIntValue("CODEBEAT_OLLAMA_ENABLED", &ollamaEnabledOk);
+    ollama_enabled_ = ollamaEnabledOk && (ollamaEnabledRaw != 0);
+    const auto ollamaBaseUrl = qEnvironmentVariable("CODEBEAT_OLLAMA_BASE_URL");
+    if (!ollamaBaseUrl.isEmpty()) {
+        ollama_base_url_ = ollamaBaseUrl;
+    }
+    const auto ollamaModel = qEnvironmentVariable("CODEBEAT_OLLAMA_MODEL");
+    if (!ollamaModel.isEmpty()) {
+        ollama_model_ = ollamaModel;
+    }
     bool voiceOutputOk = false;
     const auto voiceOutputRaw = qEnvironmentVariableIntValue("CODEBEAT_VOICE_OUTPUT", &voiceOutputOk);
     voice_output_enabled_ = !voiceOutputOk || voiceOutputRaw != 0;

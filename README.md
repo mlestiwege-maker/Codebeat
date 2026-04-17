@@ -81,6 +81,8 @@ Inside Codebeat chat, you can now run:
 - `voice standby sensitivity up` / `voice standby sensitivity down`
 - `voice standby window 6`
 - `voice identity status`
+- `ollama status`
+- `local ai <prompt>`
 - `voice enroll owner`
 - `voice enroll trusted`
 - `check battery` / `battery status`
@@ -112,6 +114,8 @@ Inside Codebeat chat, you can now run:
 	- `google qt signals slots` → opens a web search
 	- `open docs for cmake` → searches documentation
 	- `close browser` → closes Chrome/Chromium if running
+	- `ollama status` → shows whether local Ollama support is enabled
+	- `local ai explain recursion` → asks the local Ollama model a question
 	- `volume up` / `volume down` / `mute` / `unmute` → controls audio
 	- `take screenshot` → captures the screen
 
@@ -195,6 +199,12 @@ Optional voice tuning env vars:
 - `CODEBEAT_VOICE_OUTPUT` (default: `1`) speak assistant replies aloud with `spd-say` when available; set to `0` for silent mode
 - `CODEBEAT_CAMERA_INDEX` (default: `0`) to choose webcam index for face enroll/verify
 - `CODEBEAT_FACE_THRESHOLD` (optional, default profile value `0.88`) to tune owner-match strictness
+
+Local AI / Ollama env vars:
+
+- `CODEBEAT_OLLAMA_ENABLED` (default: `0`) enable local Ollama-backed replies
+- `CODEBEAT_OLLAMA_BASE_URL` (default: `http://localhost:11434`) Ollama API base URL
+- `CODEBEAT_OLLAMA_MODEL` (default: `llama3.2`) model to use for local replies
 
 These values can be set in `.env` at project root (auto-loaded by `voice_recognize.sh` and `face_auth.sh`).
 

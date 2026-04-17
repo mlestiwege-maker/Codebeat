@@ -57,6 +57,8 @@ private:
     QString voiceAuditSummary() const;
     QString voiceIdentityStatus() const;
     QString evaluateCurrentVoiceIdentity();
+    QString ollamaStatus() const;
+    QString ollamaReply(const QString& prompt) const;
     void appendVoiceAuditLog(const QString& command, const QString& outcome) const;
     void requestVoiceRoleBadgeRefresh();
     QString enrollOwnerVoiceProfile();
@@ -115,6 +117,9 @@ private:
     bool voice_owner_profile_required_for_critical_{true};
     QString voice_owner_profile_path_{};
     QString voice_trusted_profile_path_{};
+    bool ollama_enabled_{false};
+    QString ollama_base_url_{"http://localhost:11434"};
+    QString ollama_model_{"llama3.2"};
     bool last_voice_is_owner_{false};
     double last_voice_score_{1.0};
     QString last_voice_label_{"unknown"};
