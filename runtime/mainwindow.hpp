@@ -141,6 +141,9 @@ private:
     int tts_rate_{170};
     int tts_pitch_{50};
     int tts_piper_speaker_{0};
+    int tts_max_chars_{280};
+    int tts_chunk_chars_{150};
+    int tts_pause_ms_{90};
     bool voice_speaking_in_progress_{false};
     bool auto_refresh_enabled_{false};
     int auto_refresh_interval_ms_{4000};

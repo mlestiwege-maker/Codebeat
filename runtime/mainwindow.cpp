@@ -712,6 +712,9 @@ QString MainWindow::voiceDiagnostics() const {
     report += "\n• TTS config: engine=" + tts_engine_ +
               ", voice=" + tts_voice_ +
               ", rate=" + QString::number(tts_rate_);
+    report += ", max_chars=" + QString::number(tts_max_chars_) +
+              ", chunk_chars=" + QString::number(tts_chunk_chars_) +
+              ", pause_ms=" + QString::number(tts_pause_ms_);
     if (!tts_piper_model_path_.isEmpty()) {
         report += "\n• Piper model: " + tts_piper_model_path_;
     }
@@ -785,7 +788,19 @@ void MainWindow::speakText(const QString& text) {
 
     QString speakable = text;
     speakable.replace(QRegularExpression("<[^>]+>"), " ");
-    speakable.replace(QRegularExpression("[\r\n]+"), " ");
+    speakable.replace(QRegularExpression("```[\\s\\S]*?```"), " ");
+    speakable.replace('`', " ");
+    speakable.replace(QRegularExpression("https?://\\S+"), " link ");
+    speakable.replace("C++", "C plus plus", Qt::CaseInsensitive);
+    speakable.replace("Qt", "Q T", Qt::CaseInsensitive);
+    speakable.replace("UI", "U I", Qt::CaseInsensitive);
+    speakable.replace("API", "A P I", Qt::CaseInsensitive);
+    speakable.replace("vs", "versus", Qt::CaseInsensitive);
+    speakable.replace("->", ", then ");
+    speakable.replace("::", ", ");
+    speakable.replace("/", " slash ");
+    speakable.replace("_", " ");
+    speakable.replace(QRegularExpression("[\\r\\n]+"), " ");
     speakable.replace(QRegularExpression("\\s+"), " ");
     speakable = speakable.trimmed();
 
@@ -793,8 +808,37 @@ void MainWindow::speakText(const QString& text) {
         return;
     }
 
-    if (speakable.size() > 220) {
-        speakable = speakable.left(217).trimmed() + "...";
+    if (speakable.size() > tts_max_chars_) {
+        speakable = speakable.left(std::max(80, tts_max_chars_ - 3)).trimmed() + "...";
+    }
+
+    QStringList chunks;
+    const auto sentences = speakable.split(QRegularExpression("(?<=[.!?;:])\\s+"), Qt::SkipEmptyParts);
+    if (!sentences.isEmpty()) {
+        QString acc;
+        for (const auto& s : sentences) {
+            const auto piece = s.trimmed();
+            if (piece.isEmpty()) {
+                continue;
+            }
+            if (acc.isEmpty()) {
+                acc = piece;
+                continue;
+            }
+            if (acc.size() + 1 + piece.size() <= tts_chunk_chars_) {
+                acc += " " + piece;
+            } else {
+                chunks.push_back(acc);
+                acc = piece;
+            }
+        }
+        if (!acc.isEmpty()) {
+            chunks.push_back(acc);
+        }
+    }
+
+    if (chunks.isEmpty()) {
+        chunks.push_back(speakable);
     }
 
     if (activeSpeechProcess_ && activeSpeechProcess_->state() == QProcess::Running) {
@@ -827,17 +871,19 @@ void MainWindow::speakText(const QString& text) {
                      });
 
     const QString ttsScript =
-        "text=\"$1\"; "
+        "text_block=\"$1\"; "
         "rate=\"$2\"; "
         "voice=\"$3\"; "
         "engine=\"$4\"; "
         "pitch=\"$5\"; "
         "piper_model=\"$6\"; "
         "piper_speaker=\"$7\"; "
+        "pause_ms=\"$8\"; "
         ""
         "has() { command -v \"$1\" >/dev/null 2>&1; }; "
         ""
         "try_piper() { "
+        "  local text=\"$1\"; "
         "  [[ -n \"$piper_model\" ]] || return 1; "
         "  [[ -f \"$piper_model\" ]] || return 1; "
         "  has piper || return 1; "
@@ -859,49 +905,63 @@ void MainWindow::speakText(const QString& text) {
         "}; "
         ""
         "try_spdsay() { "
+        "  local text=\"$1\"; "
         "  has spd-say || return 1; "
         "  if [[ -n \"$voice\" ]]; then "
-        "    exec spd-say \"--rate=$rate\" \"--voice=$voice\" \"$text\"; "
+        "    spd-say \"--rate=$rate\" \"--voice=$voice\" \"$text\" >/dev/null 2>&1; return $?; "
         "  fi; "
-        "  exec spd-say \"--rate=$rate\" \"$text\"; "
+        "  spd-say \"--rate=$rate\" \"$text\" >/dev/null 2>&1; return $?; "
         "}; "
         ""
         "try_espeak_ng() { "
+        "  local text=\"$1\"; "
         "  has espeak-ng || return 1; "
-        "  if [[ -n \"$voice\" ]]; then exec espeak-ng -s \"$rate\" -p \"$pitch\" -v \"$voice\" \"$text\"; fi; "
-        "  exec espeak-ng -s \"$rate\" -p \"$pitch\" \"$text\"; "
+        "  if [[ -n \"$voice\" ]]; then espeak-ng -s \"$rate\" -p \"$pitch\" -v \"$voice\" \"$text\" >/dev/null 2>&1; return $?; fi; "
+        "  espeak-ng -s \"$rate\" -p \"$pitch\" \"$text\" >/dev/null 2>&1; return $?; "
         "}; "
         ""
         "try_espeak() { "
+        "  local text=\"$1\"; "
         "  has espeak || return 1; "
-        "  if [[ -n \"$voice\" ]]; then exec espeak -s \"$rate\" -p \"$pitch\" -v \"$voice\" \"$text\"; fi; "
-        "  exec espeak -s \"$rate\" -p \"$pitch\" \"$text\"; "
+        "  if [[ -n \"$voice\" ]]; then espeak -s \"$rate\" -p \"$pitch\" -v \"$voice\" \"$text\" >/dev/null 2>&1; return $?; fi; "
+        "  espeak -s \"$rate\" -p \"$pitch\" \"$text\" >/dev/null 2>&1; return $?; "
         "}; "
         ""
-        "case \"$engine\" in "
-        "  piper) try_piper || exit 1 ;; "
-        "  spd-say) try_spdsay || exit 1 ;; "
-        "  espeak-ng) try_espeak_ng || exit 1 ;; "
-        "  espeak) try_espeak || exit 1 ;; "
-        "  auto|*) "
-        "    try_piper && exit 0; "
-        "    try_spdsay || true; "
-        "    try_espeak_ng || true; "
-        "    try_espeak || true; "
-        "    exit 1 ;; "
-        "esac";
+        "speak_once() { "
+        "  local one=\"$1\"; "
+        "  [[ -n \"$one\" ]] || return 0; "
+        "  case \"$engine\" in "
+        "    piper) try_piper \"$one\" || return 1 ;; "
+        "    spd-say) try_spdsay \"$one\" || return 1 ;; "
+        "    espeak-ng) try_espeak_ng \"$one\" || return 1 ;; "
+        "    espeak) try_espeak \"$one\" || return 1 ;; "
+        "    auto|*) "
+        "      try_piper \"$one\" || try_spdsay \"$one\" || try_espeak_ng \"$one\" || try_espeak \"$one\" || return 1 ;; "
+        "  esac; "
+        "  return 0; "
+        "}; "
+        ""
+        "all_ok=0; first=1; "
+        "while IFS= read -r line; do "
+        "  [[ -n \"$line\" ]] || continue; "
+        "  if ! speak_once \"$line\"; then all_ok=1; break; fi; "
+        "  if [[ $first -eq 0 && \"$pause_ms\" -gt 0 ]]; then sleep $(awk \"BEGIN { printf \"%.3f\", $pause_ms/1000 }\"); fi; "
+        "  first=0; "
+        "done <<< \"$text_block\"; "
+        "exit $all_ok";
 
     speechProc->start("bash", {
         "-lc",
         ttsScript,
         "_",
-        speakable,
+        chunks.join("\n"),
         QString::number(std::clamp(tts_rate_, 80, 260)),
         tts_voice_,
         tts_engine_,
         QString::number(std::clamp(tts_pitch_, 0, 99)),
         tts_piper_model_path_,
-        QString::number(tts_piper_speaker_)
+        QString::number(tts_piper_speaker_),
+        QString::number(std::clamp(tts_pause_ms_, 0, 400))
     });
     if (!speechProc->waitForStarted(800)) {
         if (speechProc == activeSpeechProcess_) {
@@ -2126,6 +2186,24 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     const auto ttsSpeakerRaw = qEnvironmentVariableIntValue("CODEBEAT_TTS_PIPER_SPEAKER", &ttsSpeakerOk);
     if (ttsSpeakerOk) {
         tts_piper_speaker_ = std::clamp(ttsSpeakerRaw, -1, 999);
+    }
+
+    bool ttsMaxCharsOk = false;
+    const auto ttsMaxCharsRaw = qEnvironmentVariableIntValue("CODEBEAT_TTS_MAX_CHARS", &ttsMaxCharsOk);
+    if (ttsMaxCharsOk) {
+        tts_max_chars_ = std::clamp(ttsMaxCharsRaw, 120, 1200);
+    }
+
+    bool ttsChunkCharsOk = false;
+    const auto ttsChunkCharsRaw = qEnvironmentVariableIntValue("CODEBEAT_TTS_CHUNK_CHARS", &ttsChunkCharsOk);
+    if (ttsChunkCharsOk) {
+        tts_chunk_chars_ = std::clamp(ttsChunkCharsRaw, 80, 320);
+    }
+
+    bool ttsPauseOk = false;
+    const auto ttsPauseRaw = qEnvironmentVariableIntValue("CODEBEAT_TTS_PAUSE_MS", &ttsPauseOk);
+    if (ttsPauseOk) {
+        tts_pause_ms_ = std::clamp(ttsPauseRaw, 0, 400);
     }
 
     auto_refresh_timer_ = new QTimer(this);

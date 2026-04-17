@@ -221,6 +221,9 @@ Optional voice tuning env vars:
 - `CODEBEAT_TTS_PITCH` (default: `45`) speech pitch (range `0-99`, espeak backends)
 - `CODEBEAT_TTS_PIPER_MODEL` (optional) path to local Piper `.onnx` model for natural human-like voice
 - `CODEBEAT_TTS_PIPER_SPEAKER` (default: `0`) Piper speaker id (`-1` uses model default)
+- `CODEBEAT_TTS_MAX_CHARS` (default: `280`) max assistant reply length sent to TTS before truncation
+- `CODEBEAT_TTS_CHUNK_CHARS` (default: `150`) target size for sentence chunking to improve cadence
+- `CODEBEAT_TTS_PAUSE_MS` (default: `90`) short pause between spoken chunks for more natural pacing
 - `CODEBEAT_CAMERA_INDEX` (default: `0`) to choose webcam index for face enroll/verify
 - `CODEBEAT_FACE_THRESHOLD` (optional, default profile value `0.88`) to tune owner-match strictness
 
